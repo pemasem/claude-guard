@@ -272,3 +272,26 @@ test('docker-user: el mensaje depende de la imagen', () => {
   assert.match(r.out, /useradd -r app/);
   assert.doesNotMatch(r.out, /USER node/);
 });
+
+test('navegador headless sin sandbox: aviso, y error si el contenedor corre como root', () => {
+  // Con usuario sin privilegios: solo aviso.
+  for (const flag of ['--no-sandbox', '--disable-setuid-sandbox']) {
+    put(root, 'Dockerfile', dockerfile().replace('USER node', `ENV CHROMIUM_FLAGS=${flag}\nUSER node`));
+    const r = check();
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /\[docker-browser-no-sandbox\]/, flag);
+  }
+  put(root, 'Dockerfile', dockerfile().replace('CMD ["node", "server/index.js"]', 'CMD ["node", "server/index.js", "--no-sandbox"]'));
+  assert.match(check().out, /\[docker-browser-no-sandbox\]/);
+  // Como root: error.
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', 'ENV CHROMIUM_FLAGS=--no-sandbox\n'));
+  const r = check();
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[docker-browser-no-sandbox\][^\n]*root/);
+  // Sin la bandera, ni aviso ni error; un comentario no cuenta.
+  goodProject(root);
+  put(root, 'Dockerfile', dockerfile().replace('USER node', '# no usar --no-sandbox\nUSER node'));
+  assert.doesNotMatch(check().out, /docker-browser-no-sandbox/);
+  put(root, 'Dockerfile', dockerfile());
+  assert.doesNotMatch(check().out, /docker-browser-no-sandbox/);
+});

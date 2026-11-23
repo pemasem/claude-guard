@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `check-deploy-safety`: nueva regla `docker-browser-no-sandbox` (aviso por `--no-sandbox`/`--disable-setuid-sandbox` en el Dockerfile; error si además la imagen corre como root).
+
 - `scan-secrets`: nueva clave `secretScanAllow` (prefijos de ruta o ficheros con valores falsos conocidos; se listan siempre en la salida) y nuevos patrones `google-oauth-secret` (`GOCSPX-`) y `gcp-service-account` (JSON de cuenta de servicio con clave privada).
 
 - `check-deploy-safety`, Python: nuevas reglas `docker-python-dev-server` (`uvicorn --reload`, `fastapi dev`, `flask run`, `manage.py runserver`, `FLASK_DEBUG`, `DEBUG=True`) y `docker-debug-log` (aviso por `--log-level debug/trace`). El mensaje de `docker-user` ya no menciona `USER node` fuera de Node.

@@ -130,6 +130,13 @@ function checkDockerfile(file) {
       ? 'el contenedor corre como root: añade `USER node` (o un usuario sin privilegios) en la etapa final'
       : 'el contenedor corre como root: añade un usuario sin privilegios (p. ej. `RUN useradd -r app` + `USER app`) en la etapa final');
   }
+  // Navegador headless sin sandbox: si renderiza páginas de terceros como root y en un contenedor con secretos,
+  // un exploit del renderizador da una shell root con todo el entorno. Aviso; error si además corre como root.
+  if (/--no-sandbox\b|--disable-setuid-sandbox\b/.test(code)) {
+    (runsAsRoot ? fail : warn)('docker-browser-no-sandbox', where, runsAsRoot
+      ? 'navegador headless sin sandbox (--no-sandbox / --disable-setuid-sandbox) y el contenedor corre como root: un exploit del renderizador daría una shell root con todos los secretos del entorno'
+      : 'navegador headless sin sandbox (--no-sandbox / --disable-setuid-sandbox): un exploit del renderizador comprometería el contenedor y sus secretos; si la plataforma lo obliga, aísla el navegador en un servicio sin secretos');
+  }
   if (isPython) {
     if (/\buvicorn\b[^\n]*--reload\b|\bfastapi\s+dev\b|\bflask\b(?:\s+--?[\w-]+(?:[= ]\S+)?)*\s+run(?![\w-])|manage\.py\s+runserver\b|\bFLASK_DEBUG(?:=|\s+)["']?(?:1|true)\b|\bFLASK_ENV(?:=|\s+)["']?development\b|\b(?:DJANGO_)?DEBUG(?:=|\s+)["']?(?:True|true|1)\b/i.test(code)) {
       fail('docker-python-dev-server', where, 'servidor de desarrollo de Python o modo debug en la imagen (uvicorn --reload, fastapi dev, flask run, manage.py runserver, FLASK_DEBUG, DEBUG=True): usa uvicorn/gunicorn sin --reload y con el debug apagado');
