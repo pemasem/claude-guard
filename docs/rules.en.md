@@ -63,6 +63,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | `echo $NAME` / `echo ${NAME}` with an uppercase secret-like name | Prints the secret into the conversation. `$PATH`, `$HOME` and `$PWD` pass. |
 | `set` with no arguments (cmd or bash) | Lists every variable. `set -e` and the like pass. |
 | `VITE_…KEY=` and similar (assigning public variables that hold secrets) | See `public-secret-var`. |
+| `gcloud secrets versions access`, `gcloud auth print-access-token` / `print-identity-token`, `aws secretsmanager get-secret-value`, `az keyvault secret show`, `kubectl get secret … -o yaml/json` | They print a secret's value or a live credential: it would end up in the conversation and the logs. Listing names (`gcloud secrets list`, `kubectl get secrets`) is allowed. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | They expose the dev server to the Internet. |
 | `docker build`/`run` with `NODE_ENV=development`, `npm run dev`, `vite` or `next dev` | Development image. |
 
@@ -71,6 +72,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | Action | Files | Why |
 |---|---|---|
 | Blocks reading and editing | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (except `.example/.sample/.template/.dist` templates, with `.`, `_` or `-`, and `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secrets. |
+| Blocks reading and editing | `*.sa.json`, any `*.json` inside `credentials/` or `secrets/`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials` and `kubeconfig` (or `.kube/config`) | Service-account, package-registry, git and cluster credentials. If your `.npmrc` is configuration only, read it from the terminal (or keep the secret out of it). |
 | Blocks editing | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock` and `go.sum` | The package manager regenerates them. `scan-secrets` skips them too: thousands of hashes that look like secrets. |
 | Asks for confirmation | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` and `claude-guard.config.json` | They are the safeguards themselves: they aren't loosened without the user seeing it. |
 

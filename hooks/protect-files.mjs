@@ -10,7 +10,7 @@ if (!file) process.exit(0);
 if (isEnvFile(file, loadConfig(projectDir(input)).envTemplates)) block(`⛔ claude-guard (protect-files): ${file} contiene secretos. Claude no lo lee ni lo modifica; documenta las variables en .env.example.`);
 
 // Claves privadas y credenciales de cuentas de servicio.
-if (/\.(pem|key|p12|pfx)$|(^|\/)(id_rsa|id_ed25519)(\.pub)?$|(^|\/)(credentials|service-account)[^/]*\.json$/i.test(file) && !/\.pub$/.test(file)) {
+if (/\.(pem|key|p12|pfx)$|(^|\/)(id_rsa|id_ed25519)(\.pub)?$|(^|\/)(credentials|service-account)[^/]*\.json$|\.sa\.json$|(^|\/)(credentials|secrets)\/.*\.json$|(^|\/)\.(npmrc|pypirc|netrc|git-credentials)$|(^|\/)_netrc$|(^|\/)kubeconfig[^/]*$|(^|\/)\.kube\/config$/i.test(file) && !/\.pub$/.test(file)) {
   block(`⛔ claude-guard (protect-files): ${file} parece una clave o credencial. No se lee ni se edita.`);
 }
 

@@ -63,6 +63,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | `echo $NOMBRE` / `echo ${NOMBRE}` con nombre de secreto en mayúsculas | Imprime el secreto en la conversación. `$PATH`, `$HOME` y `$PWD` pasan. |
 | `set` sin argumentos (cmd o bash) | Lista todas las variables. `set -e` y similares pasan. |
 | `VITE_…KEY=` y similares (asignar variables públicas con secreto) | Ver `public-secret-var`. |
+| `gcloud secrets versions access`, `gcloud auth print-access-token` / `print-identity-token`, `aws secretsmanager get-secret-value`, `az keyvault secret show`, `kubectl get secret … -o yaml/json` | Imprimen el valor de un secreto o una credencial viva: acabaría en la conversación y en los logs. Listar nombres (`gcloud secrets list`, `kubectl get secrets`) sí se permite. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | Exponen el servidor de desarrollo a Internet. |
 | `docker build`/`run` con `NODE_ENV=development`, `npm run dev`, `vite` o `next dev` | Imagen de desarrollo. |
 
@@ -71,6 +72,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | Acción | Ficheros | Por qué |
 |---|---|---|
 | Bloquea leer y editar | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (salvo plantillas `.example/.sample/.template/.dist`, con `.`, `_` o `-`, y `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secretos. |
+| Bloquea leer y editar | `*.sa.json`, cualquier `*.json` dentro de `credentials/` o `secrets/`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials` y `kubeconfig` (o `.kube/config`) | Credenciales de cuentas de servicio, registros de paquetes, git y clústeres. Si tu `.npmrc` es solo de configuración, léelo con el terminal (o deja el secreto fuera de él). |
 | Bloquea editar | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock` y `go.sum` | Se regeneran con el gestor de paquetes. `scan-secrets` tampoco los recorre: son miles de hashes que parecen secretos. |
 | Pide confirmación | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` y `claude-guard.config.json` | Son las propias barreras: no se relajan sin que el usuario lo vea. |
 

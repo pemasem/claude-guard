@@ -242,3 +242,45 @@ test('protect-files: lockfiles de otros ecosistemas no se editan (sí se leen)',
   // Ficheros con nombre parecido pero que no son lockfiles.
   for (const f of ['go.mod', 'pyproject.toml', 'Cargo.toml', 'composer.json', 'my-go.sum.md']) assert.equal(file('Edit', `/p/${f}`, dir).status, 0, f);
 });
+
+test('protect-files: credenciales de cuentas de servicio, registros, git y clústeres', () => {
+  const dir = tmpDir();
+  for (const f of ['/p/deploy.sa.json', '/p/credentials/gcp.json', '/p/config/secrets/db/prod.json', '/p/.npmrc', '/p/.pypirc', '/home/u/.netrc', '/p/.git-credentials', '/p/kubeconfig', '/home/u/.kube/config', 'C:\\p\\credentials\\x.json']) {
+    assert.equal(file('Read', f, dir).status, 2, f);
+    assert.equal(file('Edit', f, dir).status, 2, f);
+  }
+  for (const f of ['/p/package.json', '/p/config/settings.json', '/p/secrets/README.md', '/p/credentials.md', '/p/src/netrc-parser.ts']) {
+    assert.equal(file('Read', f, dir).status, 0, f);
+  }
+});
+
+test('guard-bash: bloquea la extracción de secretos de la nube y de Kubernetes', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'gcloud secrets versions access latest --secret=db',
+    'gcloud auth print-access-token',
+    'gcloud auth application-default print-access-token',
+    'gcloud auth print-identity-token',
+    'aws secretsmanager get-secret-value --secret-id prod/db',
+    'az keyvault secret show --name db --vault-name v',
+    'kubectl get secret db -o yaml',
+    'kubectl get secrets -n prod -o json',
+    'kubectl get secret db -ojson',
+    'kubectl get secret db --output=yaml',
+    'kubectl -n prod get secret db -o jsonpath="{.data}"',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+  const ok = [
+    'gcloud secrets list',
+    'gcloud secrets describe db',
+    'gcloud auth login',
+    'gcloud run deploy app --source .',
+    'aws secretsmanager list-secrets',
+    'az keyvault secret list --vault-name v',
+    'kubectl get secrets',
+    'kubectl get pods -o yaml',
+    'kubectl get secret db',
+    'kubectl describe secret db',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+});
