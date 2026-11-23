@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `check-deploy-safety`, Python: nuevas reglas `docker-python-dev-server` (`uvicorn --reload`, `fastapi dev`, `flask run`, `manage.py runserver`, `FLASK_DEBUG`, `DEBUG=True`) y `docker-debug-log` (aviso por `--log-level debug/trace`). El mensaje de `docker-user` ya no menciona `USER node` fuera de Node.
+
 - Credenciales: `protect-files` bloquea `*.sa.json`, los `*.json` de `credentials/` y `secrets/`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials` y `kubeconfig`; `guard-bash` bloquea `gcloud secrets versions access`, `gcloud auth print-access-token`/`print-identity-token`, `aws secretsmanager get-secret-value`, `az keyvault secret show` y `kubectl get secret -o yaml/json`.
 
 - Lockfiles de Python, Rust, PHP, Ruby y Go (`poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`): `protect-files` no deja editarlos a mano y `scan-secrets` los omite.

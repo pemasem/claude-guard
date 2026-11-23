@@ -112,6 +112,8 @@ function checkDockerfile(file) {
   // La forma exec de CMD/ENTRYPOINT (["npm", "run", "dev"]) se aplana para que las reglas vean el comando.
   const code = stripHashComments(s).replace(/["']\s*,\s*["']/g, ' ');
   const isNode = /^\s*FROM\s+[^\n]*\bnode\b/im.test(code);
+  // Python: la imagen parte de python o el CMD/ENTRYPOINT arranca un servidor Python.
+  const isPython = /^\s*FROM\s+[^\n]*\bpython\b/im.test(code) || /^\s*(?:CMD|ENTRYPOINT)\b[^\n]*\b(?:uvicorn|gunicorn|hypercorn|daphne|flask|fastapi|manage\.py|python[\d.]*)\b/im.test(code);
 
   if (isNode && !/^\s*ENV\s+(?:[^\n]*\s)?NODE_ENV(?:=|\s+)["']?production["']?(?:\s|$)/m.test(code)) {
     fail('docker-node-env', where, 'falta `ENV NODE_ENV=production`: muchas apps (Express+Vite, Nuxt, etc.) arrancan el modo desarrollo sin él');
@@ -122,8 +124,20 @@ function checkDockerfile(file) {
   }
   const users = [...code.matchAll(/^\s*USER\s+(\S+)/gm)].map((m) => m[1]);
   const fromNonroot = /^\s*FROM\s+[^\n]*:nonroot\b/im.test(code);
-  if (!fromNonroot && (!users.length || /^(root|0)(:|$)/.test(users[users.length - 1]))) {
-    fail('docker-user', where, 'el contenedor corre como root: añade `USER node` (o un usuario sin privilegios) en la etapa final');
+  const runsAsRoot = !fromNonroot && (!users.length || /^(root|0)(:|$)/.test(users[users.length - 1]));
+  if (runsAsRoot) {
+    fail('docker-user', where, isNode
+      ? 'el contenedor corre como root: añade `USER node` (o un usuario sin privilegios) en la etapa final'
+      : 'el contenedor corre como root: añade un usuario sin privilegios (p. ej. `RUN useradd -r app` + `USER app`) en la etapa final');
+  }
+  if (isPython) {
+    if (/\buvicorn\b[^\n]*--reload\b|\bfastapi\s+dev\b|\bflask\b(?:\s+--?[\w-]+(?:[= ]\S+)?)*\s+run(?![\w-])|manage\.py\s+runserver\b|\bFLASK_DEBUG(?:=|\s+)["']?(?:1|true)\b|\bFLASK_ENV(?:=|\s+)["']?development\b|\b(?:DJANGO_)?DEBUG(?:=|\s+)["']?(?:True|true|1)\b/i.test(code)) {
+      fail('docker-python-dev-server', where, 'servidor de desarrollo de Python o modo debug en la imagen (uvicorn --reload, fastapi dev, flask run, manage.py runserver, FLASK_DEBUG, DEBUG=True): usa uvicorn/gunicorn sin --reload y con el debug apagado');
+    }
+    const startLines = code.split('\n').filter((l) => /^\s*(?:CMD|ENTRYPOINT)\b/i.test(l)).join('\n');
+    if (/--log-level(?:=|\s+)["']?(?:debug|trace)\b/i.test(startLines)) {
+      warn('docker-debug-log', where, 'el arranque usa --log-level debug/trace: los logs de depuración pueden incluir cabeceras, tokens y datos de usuario');
+    }
   }
   const secretEnv = new RegExp(`^\\s*(ENV|ARG)\\s+[A-Z0-9_]*(${SECRET_WORDS})[A-Z0-9_]*(?:=|\\s+)\\S`, 'm');
   if (secretEnv.test(code)) fail('docker-secret-env', where, 'un secreto en ENV/ARG queda grabado en las capas de la imagen: usa el gestor de secretos de la plataforma');

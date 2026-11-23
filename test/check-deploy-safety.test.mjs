@@ -207,3 +207,68 @@ test('--changed: editar el .dockerignore reporta los problemas del .dockerignore
   assert.match(r.out, /dockerignore-env/);
   assert.doesNotMatch(r.out, /vite-env-prefix/);
 });
+
+const pyDockerfile = (cmd, extra = '') => `FROM python:3.12-slim\n${extra}WORKDIR /app\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nRUN useradd -r app\nUSER app\n${cmd}\n`;
+
+test('Python: una imagen de producción correcta pasa', () => {
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]'));
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app", "--log-level", "info"]'));
+  assert.equal(check().status, 0);
+});
+
+test('Python: servidores de desarrollo y modo debug en la imagen', () => {
+  const cases = [
+    pyDockerfile('CMD ["uvicorn", "app.main:app", "--reload"]'),
+    pyDockerfile('CMD uvicorn app.main:app --host 0.0.0.0 --reload'),
+    pyDockerfile('CMD ["fastapi", "dev", "app/main.py"]'),
+    pyDockerfile('CMD ["flask", "run", "--host=0.0.0.0"]'),
+    pyDockerfile('CMD ["flask", "--app", "app", "run"]'),
+    pyDockerfile('CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV FLASK_DEBUG=1\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV FLASK_ENV=development\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV DEBUG=True\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV DJANGO_DEBUG=true\n'),
+  ];
+  for (const d of cases) {
+    put(root, 'Dockerfile', d);
+    assert.match(check().out, /\[docker-python-dev-server\]/, d);
+  }
+  // No es servidor de desarrollo: DEBUG=False, LOG_DEBUG, y "flask" solo como paquete.
+  for (const extra of ['ENV DEBUG=False\n', 'ENV LOG_DEBUG=1\n']) {
+    put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]', extra));
+    assert.doesNotMatch(check().out, /docker-python-dev-server/, extra);
+  }
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]').replace('pip install --no-cache-dir -r requirements.txt', 'pip install flask run-tools'));
+  assert.doesNotMatch(check().out, /docker-python-dev-server/);
+});
+
+test('Python: --log-level debug/trace es un aviso, no un error', () => {
+  for (const level of ['debug', 'trace']) {
+    put(root, 'Dockerfile', pyDockerfile(`CMD ["uvicorn", "app.main:app", "--log-level", "${level}"]`));
+    const r = check();
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /\[docker-debug-log\]/);
+  }
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--log-level", "info"]'));
+  assert.doesNotMatch(check().out, /docker-debug-log/);
+  put(root, 'claude-guard.config.json', JSON.stringify({ disable: ['docker-debug-log'] }));
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--log-level", "debug"]'));
+  assert.doesNotMatch(check().out, /docker-debug-log/);
+});
+
+test('las reglas de Python no se aplican a una imagen de Node', () => {
+  put(root, 'Dockerfile', dockerfile().replace('ENV NODE_ENV=production', 'ENV NODE_ENV=production\nENV DEBUG=True'));
+  assert.doesNotMatch(check().out, /docker-python-dev-server/);
+});
+
+test('docker-user: el mensaje depende de la imagen', () => {
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', ''));
+  assert.match(check().out, /USER node/);
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]').replace('RUN useradd -r app\nUSER app\n', ''));
+  const r = check();
+  assert.match(r.out, /\[docker-user\]/);
+  assert.match(r.out, /useradd -r app/);
+  assert.doesNotMatch(r.out, /USER node/);
+});
