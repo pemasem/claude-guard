@@ -207,3 +207,27 @@ test('guard-bash deja pasar el uso normal de variables de entorno', () => {
   ];
   for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
 });
+
+test('guard-bash: push forzado con "+" y refspecs hacia ramas protegidas', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'git push origin +master',
+    'git push origin +feature/x',
+    'git push origin +HEAD:feature/x',
+    'git push origin feature:master',
+    'git push origin HEAD:refs/heads/master',
+    'git push origin feature/x:refs/heads/develop',
+    'git push -u origin HEAD:main',
+    'git push origin :master',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+  const ok = [
+    'git push origin feature/T12-login',
+    'git push -u origin feature/x',
+    'git push origin feature/main-fix',
+    'git push origin feature:feature2',
+    'git push origin HEAD:refs/heads/feature/x',
+    'git push origin feature/a+b',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+});

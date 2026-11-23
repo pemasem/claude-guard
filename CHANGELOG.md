@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `guard-bash`: el push forzado con refspec `+` (`git push origin +master`) cuenta como forzado en cualquier rama, y los refspecs hacia ramas protegidas (`feature:master`, `HEAD:refs/heads/master`, `:master`) se bloquean como el push directo.
+
 - `guard-bash` bloquea más formas de volcar o leer variables de entorno: PowerShell (`$env:…` con nombre de secreto, `Get-Item Env:`, `dir env:`, `[Environment]::GetEnvironmentVariable(s)`), `python -c` imprimiendo `os.environ`/`os.getenv`, `echo $…KEY/TOKEN…` y `set` sin argumentos. `$env:PATH`, `$env:NODE_ENV` y las asignaciones pasan.
 
 - `post-edit` ya no bloquea todas las ediciones mientras el proyecto tenga un problema previo: ignora ficheros fuera del proyecto y usa `check-deploy-safety --changed <fichero>`, que solo informa de lo que causa ese fichero (y de las comprobaciones globales de Docker/`.dockerignore`/Vite/`serverEntry` cuando se edita uno de ellos). El modo completo no cambia.

@@ -13,9 +13,9 @@ const branchAlt = protectedBranches.map(esc).join('|');
 const publicSecretAssign = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})\\w*(?:${SECRET_WORDS})\\w*\\s*=`, 'i');
 
 const rules = [
-  [/git\s+push\b[^\n]*(--force\b|\s-f\b|--force-with-lease)/, 'Push forzado prohibido: reescribe historia compartida. Abre un PR o crea una rama nueva.'],
+  [/git\s+push\b[^\n]*(--force\b|\s-f\b|--force-with-lease|\s\+[^\s+])/, 'Push forzado prohibido (--force, -f o refspec con "+"): reescribe historia compartida. Abre un PR o crea una rama nueva.'],
   ...(branchAlt
-    ? [[new RegExp(`git\\s+push\\b[^\\n]*\\s(?:\\S+\\s+)?(?:HEAD:)?(?:${branchAlt})(?:\\s|$)`), `Push directo a una rama protegida (${protectedBranches.join(', ')}). El flujo es rama de trabajo → pull request.`]]
+    ? [[new RegExp(`git\\s+push\\b[^\\n]*\\s(?:\\S+\\s+)?(?:[^\\s:]*:)?(?:refs/heads/)?(?:${branchAlt})(?:\\s|$)`), `Push directo a una rama protegida (${protectedBranches.join(', ')}). El flujo es rama de trabajo → pull request.`]]
     : []),
   [/git\s+reset\s+--hard/, 'git reset --hard descarta trabajo sin posibilidad de recuperarlo. Usa git stash o una rama.'],
   [/git\s+clean\s+-[a-z]*f/, 'git clean -f borra ficheros sin seguimiento de forma irreversible.'],

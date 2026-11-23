@@ -50,8 +50,8 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 
 | Bloquea | Por qué |
 |---|---|
-| `git push --force`, `-f` y `--force-with-lease` | Reescribe historia compartida. |
-| `git push` a `protectedBranches` y `git commit` estando en ellas | El flujo es rama de trabajo y luego pull request. |
+| `git push --force`, `-f`, `--force-with-lease` y el refspec con `+` (`git push origin +rama`) | Reescribe historia compartida; el `+` fuerza igual que `--force`, en cualquier rama. |
+| `git push` a `protectedBranches` (también como refspec: `rama:master`, `HEAD:refs/heads/master`, `:master`) y `git commit` estando en ellas | El flujo es rama de trabajo y luego pull request. Un refspec con destino protegido salta la regla igual que `git push origin master`. |
 | `git reset --hard`, `git clean -f` y `rm -rf` de la raíz | Pierden trabajo de forma irreversible. |
 | `--no-verify` y `--no-gpg-sign` | Saltarse un hook oculta el problema. |
 | `npm audit fix --force` | Mete versiones mayores sin control. |

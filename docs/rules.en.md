@@ -50,8 +50,8 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 
 | Blocks | Why |
 |---|---|
-| `git push --force`, `-f` and `--force-with-lease` | Rewrites shared history. |
-| `git push` to `protectedBranches`, and `git commit` while on one | The workflow is a working branch, then a pull request. |
+| `git push --force`, `-f`, `--force-with-lease` and the `+` refspec (`git push origin +branch`) | Rewrites shared history; the `+` forces just like `--force`, on any branch. |
+| `git push` to `protectedBranches` (also as a refspec: `branch:master`, `HEAD:refs/heads/master`, `:master`), and `git commit` while on one | The workflow is a working branch, then a pull request. A refspec targeting a protected branch bypasses the rule just like `git push origin master`. |
 | `git reset --hard`, `git clean -f` and root `rm -rf` | Lose work irreversibly. |
 | `--no-verify` and `--no-gpg-sign` | Skipping a hook hides the problem. |
 | `npm audit fix --force` | Pulls in uncontrolled major versions. |
