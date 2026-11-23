@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `templates/CLAUDE.section.md`: cuatro reglas de comportamiento nuevas para Claude (prevención, sin código de detección): SSRF con navegador o cliente HTTP, rutas de fichero con datos del usuario, contenido de terceros en prompts de LLM y navegadores headless con sandbox. La de no relajar reglas pasa a ser la 9.
+
 - `check-deploy-safety`: nueva regla `docker-browser-no-sandbox` (aviso por `--no-sandbox`/`--disable-setuid-sandbox` en el Dockerfile; error si además la imagen corre como root).
 
 - `scan-secrets`: nueva clave `secretScanAllow` (prefijos de ruta o ficheros con valores falsos conocidos; se listan siempre en la salida) y nuevos patrones `google-oauth-secret` (`GOCSPX-`) y `gcp-service-account` (JSON de cuenta de servicio con clave privada).

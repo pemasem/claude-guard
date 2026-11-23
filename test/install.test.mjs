@@ -109,3 +109,14 @@ test('el instalador deniega también .env_* y .env-*', () => {
   const deny = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8')).permissions.deny;
   for (const d of ['Read(**/.env_*)', 'Read(**/.env-*)', 'Edit(**/.env_*)', 'Read(**/*.env)']) assert.ok(deny.includes(d), d);
 });
+
+test('la sección de CLAUDE.md incluye las reglas de comportamiento y deja la de no relajar reglas la última', () => {
+  const dir = tmpDir();
+  run(installer, [dir, '--claude-md']);
+  const md = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+  const numbers = [...md.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]));
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  for (const re of [/SSRF/, /relative_to\(base\)/, /delimitado y marcado como datos/, /--no-sandbox/]) assert.match(md, re);
+  const last = md.split('\n').filter((l) => /^\d+\. /.test(l)).pop();
+  assert.match(last, /^9\. \*\*Ninguna regla de claude-guard se relaja/);
+});
