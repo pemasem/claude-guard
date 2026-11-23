@@ -72,4 +72,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 
 ## post-edit
 
-Tras cada edición ejecuta `scan-secrets` sobre el fichero y `check-deploy-safety` sobre el proyecto (incluido el fichero, aunque aún no esté versionado). Cualquier fallo devuelve exit 2 y Claude tiene que corregirlo antes de seguir.
+Tras cada edición ejecuta `scan-secrets` sobre el fichero y `check-deploy-safety --changed <fichero>` (incluido el fichero, aunque aún no esté versionado). Cualquier fallo devuelve exit 2 y Claude tiene que corregirlo antes de seguir.
+
+- **Ficheros fuera del proyecto** (una carpeta temporal, por ejemplo): se ignoran. No son asunto de las reglas del proyecto.
+- **Modo acotado** (`--changed`): solo se informa de los problemas cuya ubicación es el fichero editado y, si el fichero editado es el Dockerfile, el `.dockerignore`, la config de Vite o `serverEntry`, de las comprobaciones globales de ese grupo. Un problema previo en otro sitio ya no bloquea cualquier edición. El modo completo (CI, sin `--changed`) no cambia.

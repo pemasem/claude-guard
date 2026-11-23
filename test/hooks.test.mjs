@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { FAKE, PKG, git, put, run, tmpDir } from './helpers.mjs';
+import { FAKE, PKG, git, goodProject, put, run, tmpDir } from './helpers.mjs';
 
 const hook = (name) => path.join(PKG, 'hooks', name);
 const bash = (command, dir) => run(hook('guard-bash.mjs'), [], { input: JSON.stringify({ tool_input: { command }, cwd: dir }), env: { CLAUDE_PROJECT_DIR: dir } });
@@ -120,4 +120,37 @@ test('envTemplates: plantillas propias versionadas (.env.master) legibles', () =
   assert.equal(file('Read', '/p/src/.env.master', dir).status, 0);
   assert.equal(bash('cat src/.env.master', dir).status, 0);
   assert.equal(file('Read', '/p/src/.env_prod', dir).status, 2);
+});
+
+test('post-edit: ignora ficheros fuera del proyecto y problemas previos ajenos al fichero editado', () => {
+  const dir = goodProject(tmpDir());
+  run(path.join(PKG, 'install.mjs'), [dir]);
+  const post = (f) => run(path.join(dir, '.claude', 'hooks', 'claude-guard', 'post-edit.mjs'), [], { input: JSON.stringify({ tool_input: { file_path: f } }), env: { CLAUDE_PROJECT_DIR: dir } });
+  // Problema previo en el proyecto: la imagen corre como root.
+  put(dir, 'Dockerfile', fs.readFileSync(path.join(dir, 'Dockerfile'), 'utf8').replace('USER node\n', ''));
+
+  const outside = put(tmpDir(), 'notes.md', 'texto\n');
+  assert.equal(post(outside).status, 0, post(outside).out);
+  // Aunque el fichero ajeno contenga un secreto: no es del proyecto.
+  const outsideLeak = put(tmpDir(), 'k.ts', `const k = '${FAKE.googleKey}';\n`);
+  assert.equal(post(outsideLeak).status, 0);
+
+  const unrelated = put(dir, 'src/server/ok.ts', 'export const a = 1;\n');
+  assert.equal(post(unrelated).status, 0, post(unrelated).out);
+
+  // Editar el Dockerfile roto sí bloquea.
+  const r = post(path.join(dir, 'Dockerfile'));
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /\[docker-user\]/);
+});
+
+test('post-edit: un .env versionado bloquea al editarlo, no al editar otro fichero', () => {
+  const dir = goodProject(tmpDir());
+  run(path.join(PKG, 'install.mjs'), [dir]);
+  git(dir, 'init', '-q');
+  put(dir, 'config/.env_prod', 'X=1\n');
+  git(dir, 'add', '-A');
+  const post = (f) => run(path.join(dir, '.claude', 'hooks', 'claude-guard', 'post-edit.mjs'), [], { input: JSON.stringify({ tool_input: { file_path: f } }), env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(post(path.join(dir, 'server', 'index.js')).status, 0);
+  assert.equal(post(path.join(dir, 'config', '.env_prod')).status, 2);
 });

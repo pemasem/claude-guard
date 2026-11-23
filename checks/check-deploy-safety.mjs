@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 const argv = process.argv.slice(2);
 const rootIdx = argv.indexOf('--root');
 const rootArg = rootIdx >= 0 ? argv.splice(rootIdx, 2)[1] : null;
+const changedIdx = argv.indexOf('--changed');
+const changedArg = changedIdx >= 0 ? argv.splice(changedIdx, 2)[1] : null;
 const root = path.resolve(rootArg || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 
 const DEFAULTS = {
@@ -72,10 +74,10 @@ const TEXT_EXT = /\.(m?[jt]sx?|c[jt]s|json|md|mdx|ya?ml|html|css|scss|sh|ps1|txt
 const problems = [];
 const warnings = [];
 function fail(rule, where, msg) {
-  if (!disabled.has(rule)) problems.push(`[${rule}] ${where}: ${msg}`);
+  if (!disabled.has(rule)) problems.push({ rule, where, text: `[${rule}] ${where}: ${msg}` });
 }
 function warn(rule, where, msg) {
-  if (!disabled.has(rule)) warnings.push(`[${rule}] ${where}: ${msg}`);
+  if (!disabled.has(rule)) warnings.push({ rule, where, text: `[${rule}] ${where}: ${msg}` });
 }
 
 function gitFiles() {
@@ -227,7 +229,21 @@ function checkFiles(extra) {
   }
 }
 
-const extra = argv
+// Modo acotado (--changed <fichero>, lo usa el hook tras cada edición): solo cuenta lo que causa ese fichero.
+// Un fichero ajeno al proyecto no se comprueba. El modo completo (CI) no cambia.
+const changedRel = changedArg ? rel(path.resolve(changedArg)) : null;
+if (changedRel !== null && (!changedRel || changedRel.startsWith('..') || path.isAbsolute(changedRel))) process.exit(0);
+const changedGroup = (() => {
+  if (changedRel === null) return null;
+  if ((config.dockerfiles || []).includes(changedRel) || changedRel === config.dockerignore) return 'docker';
+  if ((config.viteConfigs || []).includes(changedRel)) return 'vite';
+  if (config.serverEntry && changedRel === config.serverEntry) return 'server';
+  return null;
+})();
+const groupOf = (rule) => (/^docker/.test(rule) ? 'docker' : /^vite-/.test(rule) ? 'vite' : /^server-/.test(rule) ? 'server' : null);
+const causedByChanged = (p) => changedRel === null || p.where === changedRel || (changedGroup !== null && groupOf(p.rule) === changedGroup);
+
+const extra = [...argv, ...(changedArg ? [changedArg] : [])]
   .map((p) => rel(path.resolve(p)))
   .filter((p) => p && !p.startsWith('..') && !path.isAbsolute(p));
 
@@ -238,9 +254,11 @@ checkViteConfig();
 checkServerEntry();
 checkFiles(extra);
 
-if (warnings.length) console.warn('⚠ claude-guard: avisos\n' + warnings.map((w) => '  - ' + w).join('\n'));
-if (problems.length) {
-  console.error(`✖ claude-guard · seguridad del despliegue: ${problems.length} problema(s)\n` + problems.map((p) => '  - ' + p).join('\n'));
+const shownWarnings = warnings.filter(causedByChanged);
+const shownProblems = problems.filter(causedByChanged);
+if (shownWarnings.length) console.warn('⚠ claude-guard: avisos\n' + shownWarnings.map((w) => '  - ' + w.text).join('\n'));
+if (shownProblems.length) {
+  console.error(`✖ claude-guard · seguridad del despliegue: ${shownProblems.length} problema(s)\n` + shownProblems.map((p) => '  - ' + p.text).join('\n'));
   console.error('\nCorrige la causa; no relajes la regla. Catálogo y motivos: docs/reglas.md del repositorio claude-guard.');
   process.exit(1);
 }

@@ -72,4 +72,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 
 ## post-edit
 
-After every edit it runs `scan-secrets` on the file and `check-deploy-safety` on the project (including the file, even if it isn't committed yet). Any failure returns exit 2, and Claude has to fix it before moving on.
+After every edit it runs `scan-secrets` on the file and `check-deploy-safety --changed <file>` (including the file, even if it isn't committed yet). Any failure returns exit 2, and Claude has to fix it before moving on.
+
+- **Files outside the project** (a temp folder, say) are ignored. They are not the project's rules' business.
+- **Scoped mode** (`--changed`): it only reports problems located in the edited file and, if the edited file is the Dockerfile, the `.dockerignore`, the Vite config or `serverEntry`, the global checks of that group. A pre-existing problem elsewhere no longer blocks every edit. Full mode (CI, no `--changed`) is unchanged.

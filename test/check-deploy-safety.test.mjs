@@ -175,3 +175,35 @@ test('.dockerignore acepta **/.env_* y no se puede re-incluir .env_prod', () => 
   put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n!.env_example\n');
   assert.equal(check().status, 0);
 });
+
+test('--changed: solo los problemas causados por ese fichero', () => {
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', ''));
+  put(root, 'src/components/Bad.tsx', `export const k = '${FAKE.publicSecretVar}';\n`);
+  const scoped = (f) => run(script, ['--root', root, '--changed', path.join(root, f)]);
+  // Fichero ajeno a los problemas: pasa.
+  assert.equal(scoped('server/index.js').status, 0, scoped('server/index.js').out);
+  // El propio Dockerfile o el fichero con la variable pública: falla, y solo por lo suyo.
+  const d = scoped('Dockerfile');
+  assert.equal(d.status, 1);
+  assert.match(d.out, /\[docker-user\]/);
+  assert.doesNotMatch(d.out, /public-secret-var/);
+  const b = scoped('src/components/Bad.tsx');
+  assert.equal(b.status, 1);
+  assert.match(b.out, /public-secret-var/);
+  assert.doesNotMatch(b.out, /docker-user/);
+  // Fuera del proyecto: se ignora.
+  assert.equal(run(script, ['--root', root, '--changed', path.join(tmpDir(), 'x.md')]).status, 0);
+  // Modo completo (CI): ve todo.
+  const full = check();
+  assert.match(full.out, /docker-user/);
+  assert.match(full.out, /public-secret-var/);
+});
+
+test('--changed: editar el .dockerignore reporta los problemas del .dockerignore, no los de Vite', () => {
+  put(root, '.dockerignore', 'node_modules\n');
+  put(root, 'vite.config.ts', "import { defineConfig } from 'vite';\nexport default defineConfig({ envPrefix: '' });\n");
+  const r = run(script, ['--root', root, '--changed', path.join(root, '.dockerignore')]);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /dockerignore-env/);
+  assert.doesNotMatch(r.out, /vite-env-prefix/);
+});

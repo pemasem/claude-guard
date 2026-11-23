@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `post-edit` ya no bloquea todas las ediciones mientras el proyecto tenga un problema previo: ignora ficheros fuera del proyecto y usa `check-deploy-safety --changed <fichero>`, que solo informa de lo que causa ese fichero (y de las comprobaciones globales de Docker/`.dockerignore`/Vite/`serverEntry` cuando se edita uno de ellos). El modo completo no cambia.
+
 - Ficheros de entorno con otros nombres (`.env_local`, `.env_prod`, `.env-staging`, `prod.env`) protegidos en `protect-files`, `guard-bash` (incluido `Get-Content`/`gc`/`Select-String`), `env-tracked`, `dockerignore-env` y la lista de denegaciones del instalador. Nueva clave `envTemplates` para plantillas propias (`.env.master`).
 
 ## 0.1.0 — 2026-11-23
