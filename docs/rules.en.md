@@ -58,6 +58,10 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | `DROP TABLE`/`DATABASE`/`SCHEMA` and `TRUNCATE TABLE` | Destructive; migrations should be additive. |
 | `cat`/`type`/`Get-Content`/`grep`/… on env files (`.env`, `.env_prod`, `.env-staging`, `prod.env`…; except templates and `envTemplates`) | The contents would end up in the conversation and the logs. |
 | `printenv`, `env`, `Get-ChildItem env:` and `/proc/self/environ` | Same as above, with every variable at once. |
+| PowerShell: `$env:NAME` with a secret-like name (KEY, SECRET, TOKEN…), `Get-Item Env:NAME`, `dir env:`, `ls env:`, `[Environment]::GetEnvironmentVariables()` and `GetEnvironmentVariable(…)` with a secret-like or non-literal name | Same as above, in PowerShell. `$env:PATH`, `$env:NODE_ENV`, `$env:PWD` and assignments (`$env:X = …`) are allowed. |
+| `python -c` printing `os.environ` or `os.getenv` | Dumps keys. Reading a literal, non-secret key (`os.environ['HOME']`) is allowed. |
+| `echo $NAME` / `echo ${NAME}` with an uppercase secret-like name | Prints the secret into the conversation. `$PATH`, `$HOME` and `$PWD` pass. |
+| `set` with no arguments (cmd or bash) | Lists every variable. `set -e` and the like pass. |
 | `VITE_…KEY=` and similar (assigning public variables that hold secrets) | See `public-secret-var`. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | They expose the dev server to the Internet. |
 | `docker build`/`run` with `NODE_ENV=development`, `npm run dev`, `vite` or `next dev` | Development image. |

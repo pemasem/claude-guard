@@ -58,6 +58,10 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | `DROP TABLE`/`DATABASE`/`SCHEMA` y `TRUNCATE TABLE` | Destructivo; las migraciones deben ser aditivas. |
 | `cat`/`type`/`Get-Content`/`grep`/… sobre ficheros de entorno (`.env`, `.env_prod`, `.env-staging`, `prod.env`…; salvo plantillas y `envTemplates`) | El contenido acabaría en la conversación y en los logs. |
 | `printenv`, `env`, `Get-ChildItem env:` y `/proc/self/environ` | Igual que lo anterior, con todas las variables a la vez. |
+| PowerShell: `$env:NOMBRE` con nombre de secreto (KEY, SECRET, TOKEN…), `Get-Item Env:NOMBRE`, `dir env:`, `ls env:`, `[Environment]::GetEnvironmentVariables()` y `GetEnvironmentVariable(…)` con nombre de secreto o no literal | Lo mismo en PowerShell. Se permiten `$env:PATH`, `$env:NODE_ENV`, `$env:PWD` y las asignaciones (`$env:X = …`). |
+| `python -c` que imprime `os.environ` o `os.getenv` | Vuelca las claves. Se permite leer una clave literal que no sea secreta (`os.environ['HOME']`). |
+| `echo $NOMBRE` / `echo ${NOMBRE}` con nombre de secreto en mayúsculas | Imprime el secreto en la conversación. `$PATH`, `$HOME` y `$PWD` pasan. |
+| `set` sin argumentos (cmd o bash) | Lista todas las variables. `set -e` y similares pasan. |
 | `VITE_…KEY=` y similares (asignar variables públicas con secreto) | Ver `public-secret-var`. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | Exponen el servidor de desarrollo a Internet. |
 | `docker build`/`run` con `NODE_ENV=development`, `npm run dev`, `vite` o `next dev` | Imagen de desarrollo. |

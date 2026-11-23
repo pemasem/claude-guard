@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `guard-bash` bloquea más formas de volcar o leer variables de entorno: PowerShell (`$env:…` con nombre de secreto, `Get-Item Env:`, `dir env:`, `[Environment]::GetEnvironmentVariable(s)`), `python -c` imprimiendo `os.environ`/`os.getenv`, `echo $…KEY/TOKEN…` y `set` sin argumentos. `$env:PATH`, `$env:NODE_ENV` y las asignaciones pasan.
+
 - `post-edit` ya no bloquea todas las ediciones mientras el proyecto tenga un problema previo: ignora ficheros fuera del proyecto y usa `check-deploy-safety --changed <fichero>`, que solo informa de lo que causa ese fichero (y de las comprobaciones globales de Docker/`.dockerignore`/Vite/`serverEntry` cuando se edita uno de ellos). El modo completo no cambia.
 
 - Ficheros de entorno con otros nombres (`.env_local`, `.env_prod`, `.env-staging`, `prod.env`) protegidos en `protect-files`, `guard-bash` (incluido `Get-Content`/`gc`/`Select-String`), `env-tracked`, `dockerignore-env` y la lista de denegaciones del instalador. Nueva clave `envTemplates` para plantillas propias (`.env.master`).

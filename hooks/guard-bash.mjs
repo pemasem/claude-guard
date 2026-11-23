@@ -44,6 +44,35 @@ function readsEnvFile(command) {
 if (readsEnvFile(cmd)) block(`⛔ claude-guard (guard-bash): No se leen ficheros .env: contienen secretos. Usa .env.example como referencia.
 Comando: ${cmd}`);
 
+// Lectura de variables de entorno con nombre de secreto (PowerShell, .NET, Python, bash) o volcado completo.
+const SECRET_NAME = '[A-Za-z0-9_]*(?:' + SECRET_WORDS + ')[A-Za-z0-9_]*';
+const envReadRules = [
+  // PowerShell: $env:OPENAI_API_KEY y la forma con llaves. Se permite $env:PATH, $env:NODE_ENV, $env:PWD y las asignaciones.
+  [new RegExp('\\$\\{?env:(?!(?:OLD)?PWD\\b)' + SECRET_NAME + '(?![A-Za-z0-9_])\\}?(?!\\s*[-+*/]?=(?!=))', 'i'), 'No se lee una variable de entorno con nombre de secreto ($env:…): su valor acabaría en la conversación.'],
+  // Get-Item Env:X, Get-ChildItem/dir/ls env: (volcado completo o variable con nombre de secreto).
+  [new RegExp('\\b(?:Get-ChildItem|gci|dir|ls|Get-Item|gi|Get-Content|gc)\\s+(?:-(?:Literal)?Path\\s+)?["\']?env:(?:\\*?["\']?(?:\\s|$|[|;&)])|' + SECRET_NAME + ')', 'i'), 'No se vuelcan ni se leen variables de entorno con nombre de secreto (Get-Item/dir/ls env:).'],
+  // .NET: [Environment]::GetEnvironmentVariables() siempre; GetEnvironmentVariable(...) con nombre de secreto o no literal.
+  [/\[Environment\]::GetEnvironmentVariables\s*\(/i, 'No se vuelcan todas las variables de entorno ([Environment]::GetEnvironmentVariables).'],
+  [new RegExp('\\[Environment\\]::GetEnvironmentVariable\\s*\\(\\s*(?:["\'][^"\']*(?:' + SECRET_WORDS + ')[^"\']*["\']|(?!["\']))', 'i'), 'No se lee una variable de entorno con nombre de secreto ([Environment]::GetEnvironmentVariable).'],
+  // bash: echo con una variable con nombre de secreto (solo nombres en mayúsculas; $PWD queda fuera).
+  [new RegExp('\\b(?:echo|printf|print)\\b[^\\n|;&]*\\$\\{?(?!(?:OLD)?PWD\\b)' + SECRET_NAME.replace(/\[A-Za-z0-9_\]/g, '[A-Z0-9_]')), 'No se imprime una variable de entorno con nombre de secreto (echo $…KEY/SECRET/TOKEN…).'],
+  // cmd / bash: "set" sin argumentos vuelca todas las variables.
+  [/(?:^|[;&|\n]\s*|\bcmd(?:\.exe)?\s+\/[ck]\s+)set\s*(?:$|[;&|\n])/i, 'No se vuelcan variables de entorno: "set" sin argumentos las lista todas.'],
+];
+for (const [re, reason] of envReadRules) {
+  if (re.test(cmd)) block(`⛔ claude-guard (guard-bash): ${reason}\nComando: ${cmd}`);
+}
+
+// Python: python -c con os.environ / os.getenv impreso o volcado. Se permite leer una clave literal que no sea secreta.
+function dumpsPythonEnv(command) {
+  if (!/\b(?:python[\d.]*|py)(?:\.exe)?\s+(?:-[\w-]+\s+)*-c\b/i.test(command)) return false;
+  const rest = command
+    .replace(new RegExp('os\\.environ\\s*\\[\\s*(["\'])(?![^"\']*(?:' + SECRET_WORDS + '))[^"\']*\\1\\s*\\]', 'gi'), '')
+    .replace(new RegExp('os\\.(?:environ\\.get|getenv)\\s*\\(\\s*(["\'])(?![^"\']*(?:' + SECRET_WORDS + '))[^"\']*\\1[^)]*\\)', 'gi'), '');
+  return /os\.(?:environ|getenv)/.test(rest) && /\b(?:print|pprint|dump|dumps|json)\b/.test(rest);
+}
+if (dumpsPythonEnv(cmd)) block(`⛔ claude-guard (guard-bash): python -c que imprime os.environ/os.getenv: puede volcar claves. Lee solo variables concretas que no sean secretas.\nComando: ${cmd}`);
+
 for (const [re, reason] of rules) {
   if (re.test(cmd)) block(`⛔ claude-guard (guard-bash): ${reason}\nComando: ${cmd}`);
 }

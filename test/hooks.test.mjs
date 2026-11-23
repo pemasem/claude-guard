@@ -154,3 +154,56 @@ test('post-edit: un .env versionado bloquea al editarlo, no al editar otro fiche
   assert.equal(post(path.join(dir, 'server', 'index.js')).status, 0);
   assert.equal(post(path.join(dir, 'config', '.env_prod')).status, 2);
 });
+
+test('guard-bash bloquea el volcado y la lectura de variables de entorno con secretos', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'Write-Host $env:OPENAI_API_KEY',
+    'echo ${env:GITHUB_TOKEN}',
+    'Get-Item Env:DB_PASSWORD',
+    'dir env:',
+    'ls env:',
+    'Get-ChildItem env:*',
+    'gi env:SECRET_KEY',
+    '[Environment]::GetEnvironmentVariable("API_KEY")',
+    '[Environment]::GetEnvironmentVariable($name)',
+    '[Environment]::GetEnvironmentVariables()',
+    'python -c "import os; print(os.environ)"',
+    'python3 -c "import os,json; print(json.dumps(dict(os.environ)))"',
+    'python -c "import os; print(os.getenv(\'OPENAI_API_KEY\'))"',
+    'python -c "import os; print(os.environ[\'DB_PASSWORD\'])"',
+    'py -c "import os; [print(k, v) for k, v in os.environ.items()]"',
+    'echo $OPENAI_API_KEY',
+    'echo "token: ${GITHUB_TOKEN}"',
+    'printf "%s" $DB_PASSWORD',
+    'set',
+    'cmd /c set',
+    'cd app && set',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+});
+
+test('guard-bash deja pasar el uso normal de variables de entorno', () => {
+  const dir = tmpDir();
+  const ok = [
+    '$env:PATH = "C:\\tools;" + $env:PATH',
+    'Write-Host $env:NODE_ENV',
+    '$env:OPENAI_API_KEY = "x"',
+    '$env:PWD',
+    'ls env:PATH',
+    'Get-Item Env:NODE_ENV',
+    '[Environment]::GetEnvironmentVariable("PATH")',
+    'python -c "import os; print(os.environ[\'HOME\'])"',
+    'python -c "import os; print(os.getenv(\'NODE_ENV\', \'dev\'))"',
+    'python -c "import os; os.environ[\'X\'] = \'1\'"',
+    'python -c "print(1+1)"',
+    'python script.py',
+    'echo $PATH',
+    'echo $HOME $PWD',
+    'echo hola',
+    'set -e',
+    'set -o pipefail; npm test',
+    'npm run set',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+});
