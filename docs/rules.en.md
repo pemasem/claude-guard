@@ -71,7 +71,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | Action | Files | Why |
 |---|---|---|
 | Blocks reading and editing | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (except `.example/.sample/.template/.dist` templates, with `.`, `_` or `-`, and `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secrets. |
-| Blocks editing | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` and `bun.lockb` | The package manager regenerates them. |
+| Blocks editing | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock` and `go.sum` | The package manager regenerates them. `scan-secrets` skips them too: thousands of hashes that look like secrets. |
 | Asks for confirmation | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` and `claude-guard.config.json` | They are the safeguards themselves: they aren't loosened without the user seeing it. |
 
 ## post-edit

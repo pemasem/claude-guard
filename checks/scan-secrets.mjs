@@ -23,7 +23,7 @@ const RULES = [
   ['jwt', P('\\bey', 'J[0-9A-Za-z_\\-]{20,}\\.ey', 'J[0-9A-Za-z_\\-]{20,}\\.[0-9A-Za-z_\\-]{20,}')],
   ['stripe-secret', P('\\b(?:sk|rk)_', 'live_[0-9A-Za-z]{20,}')],
 ];
-const SKIP = /(^|\/)(node_modules|\.git|dist|build|coverage)\/|\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|woff2?|ttf|mp4|lock)$|(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i;
+const SKIP = /(^|\/)(node_modules|\.git|dist|build|coverage)\/|\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|woff2?|ttf|mp4|lock)$|(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv\.lock|Pipfile\.lock|Cargo\.lock|composer\.lock|Gemfile\.lock|go\.sum)$/i;
 
 function listFiles() {
   try {

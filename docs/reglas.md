@@ -71,7 +71,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | Acción | Ficheros | Por qué |
 |---|---|---|
 | Bloquea leer y editar | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (salvo plantillas `.example/.sample/.template/.dist`, con `.`, `_` o `-`, y `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secretos. |
-| Bloquea editar | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` y `bun.lockb` | Se regeneran con el gestor de paquetes. |
+| Bloquea editar | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock` y `go.sum` | Se regeneran con el gestor de paquetes. `scan-secrets` tampoco los recorre: son miles de hashes que parecen secretos. |
 | Pide confirmación | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` y `claude-guard.config.json` | Son las propias barreras: no se relajan sin que el usuario lo vea. |
 
 ## post-edit

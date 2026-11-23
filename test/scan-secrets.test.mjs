@@ -27,3 +27,11 @@ test('un fichero limpio pasa', () => {
   const a = put(dir, 'a.ts', 'const k = process.env.GEMINI_API_KEY;\n');
   assert.equal(run(script, [a]).status, 0);
 });
+
+test('los lockfiles de otros ecosistemas no se escanean', () => {
+  const dir = tmpDir();
+  const files = ['go.sum', 'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'composer.lock', 'Gemfile.lock'].map((f) => put(dir, f, `h1:${FAKE.googleKey}\n`));
+  assert.equal(run(script, files).status, 0);
+  // Un fichero normal con el mismo contenido sí se detecta.
+  assert.equal(run(script, [put(dir, 'go.mod', `h1:${FAKE.googleKey}\n`)]).status, 1);
+});

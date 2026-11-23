@@ -231,3 +231,14 @@ test('guard-bash: push forzado con "+" y refspecs hacia ramas protegidas', () =>
   ];
   for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
 });
+
+test('protect-files: lockfiles de otros ecosistemas no se editan (sí se leen)', () => {
+  const dir = tmpDir();
+  for (const f of ['poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'composer.lock', 'Gemfile.lock', 'go.sum']) {
+    assert.equal(file('Edit', `/p/src/${f}`, dir).status, 2, f);
+    assert.equal(file('Write', `C:\\p\\${f}`, dir).status, 2, f);
+    assert.equal(file('Read', `/p/src/${f}`, dir).status, 0, f);
+  }
+  // Ficheros con nombre parecido pero que no son lockfiles.
+  for (const f of ['go.mod', 'pyproject.toml', 'Cargo.toml', 'composer.json', 'my-go.sum.md']) assert.equal(file('Edit', `/p/${f}`, dir).status, 0, f);
+});

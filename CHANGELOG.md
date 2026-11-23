@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- Lockfiles de Python, Rust, PHP, Ruby y Go (`poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock`, `composer.lock`, `Gemfile.lock`, `go.sum`): `protect-files` no deja editarlos a mano y `scan-secrets` los omite.
+
 - `guard-bash`: el push forzado con refspec `+` (`git push origin +master`) cuenta como forzado en cualquier rama, y los refspecs hacia ramas protegidas (`feature:master`, `HEAD:refs/heads/master`, `:master`) se bloquean como el push directo.
 
 - `guard-bash` bloquea más formas de volcar o leer variables de entorno: PowerShell (`$env:…` con nombre de secreto, `Get-Item Env:`, `dir env:`, `[Environment]::GetEnvironmentVariable(s)`), `python -c` imprimiendo `os.environ`/`os.getenv`, `echo $…KEY/TOKEN…` y `set` sin argumentos. `$env:PATH`, `$env:NODE_ENV` y las asignaciones pasan.

@@ -16,8 +16,8 @@ if (/\.(pem|key|p12|pfx)$|(^|\/)(id_rsa|id_ed25519)(\.pub)?$|(^|\/)(credentials|
 
 if (tool === 'Read') process.exit(0);
 
-if (/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/.test(file)) {
-  block('⛔ claude-guard (protect-files): los lockfiles no se editan a mano; usa el gestor de paquetes (npm/yarn/pnpm install).');
+if (/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb|poetry\.lock|uv\.lock|Pipfile\.lock|Cargo\.lock|composer\.lock|Gemfile\.lock|go\.sum)$/.test(file)) {
+  block('⛔ claude-guard (protect-files): los lockfiles no se editan a mano; usa el gestor de paquetes (npm/yarn/pnpm, poetry, uv, pipenv, cargo, composer, bundler, go mod).');
 }
 
 // Las barreras de seguridad solo se cambian con aprobación explícita del usuario.
