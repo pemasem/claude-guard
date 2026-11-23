@@ -48,6 +48,15 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | `env-tracked` | Ningún fichero de entorno versionado (`.env`, `.env.local`, `.env_prod`, `.env-staging`, `prod.env`…), salvo plantillas (`.example/.sample/.template/.dist`, con `.`, `_` o `-`) y las de `envTemplates` | Una vez en git, el secreto queda en el historial: hay que rotarlo. Las plantillas propias con otro nombre (`.env.master`) se declaran en `envTemplates`. |
 | `server-entry` / `server-static-vite` | (con `serverEntry`) El servidor importa `vite` solo dinámicamente, dentro de la rama de desarrollo | La imagen de producción no necesita vite, ni puede arrancarlo por error. |
 
+### Escaneo de secretos (`scan-secrets`)
+
+| Patrón | Detecta |
+|---|---|
+| `google-oauth-secret` | Secretos de cliente OAuth de Google (prefijo `GOCSPX-`) |
+| `gcp-service-account` | JSON de cuenta de servicio de Google: un `type` de cuenta de servicio junto a una `private_key` (en cualquier línea del fichero) |
+
+Los ficheros con valores falsos conocidos (claves PEM de test, por ejemplo) se declaran en `secretScanAllow` (prefijos de ruta o ficheros). Se omiten del escaneo, pero la salida lista siempre cuáles, para que sigan a la vista. Una línea con `secret-scan: ignore` sigue valiendo para valores sueltos.
+
 ## guard-bash (comandos)
 
 | Bloquea | Por qué |

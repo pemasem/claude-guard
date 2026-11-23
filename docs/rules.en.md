@@ -48,6 +48,15 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | `env-tracked` | No committed env file (`.env`, `.env.local`, `.env_prod`, `.env-staging`, `prod.env`…), except templates (`.example/.sample/.template/.dist`, with `.`, `_` or `-`) and those listed in `envTemplates` | Once in git, the secret stays in the history and has to be rotated. Your own template names (`.env.master`) go in `envTemplates`. |
 | `server-entry` / `server-static-vite` | (with `serverEntry`) The server imports `vite` only dynamically, inside the development branch | The production image doesn't need vite and can't start it by mistake. |
 
+### Secret scanning (`scan-secrets`)
+
+| Pattern | Detects |
+|---|---|
+| `google-oauth-secret` | Google OAuth client secrets (`GOCSPX-` prefix) |
+| `gcp-service-account` | Google service-account JSON: a service-account `type` together with a `private_key` (on any line of the file) |
+
+Files with known fake values (test PEM keys, for example) are declared in `secretScanAllow` (path prefixes or files). They are skipped, but the output always lists which ones, so they stay visible. A line with `secret-scan: ignore` still works for single values.
+
 ## guard-bash (commands)
 
 | Blocks | Why |

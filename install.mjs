@@ -30,6 +30,7 @@ const DEFAULT_CONFIG = {
   _info: 'claude-guard: ajusta las rutas a tu proyecto. "disable" solo con una razón documentada aquí. Ver README de claude-guard.',
   protectedBranches: ['main', 'master', 'develop'],
   envTemplates: [],
+  secretScanAllow: [],
   dockerfiles: ['Dockerfile'],
   dockerignore: '.dockerignore',
   viteConfigs: ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts'],

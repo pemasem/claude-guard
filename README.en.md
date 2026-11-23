@@ -75,6 +75,7 @@ To update: `git pull` in `claude-guard` and run the installer again. It is idemp
 | `allowMention` | `docs/`, `test/`… | Paths allowed to **name** public variables that hold secrets (to document or test them) |
 | `strictImportMetaEnv` | `false` | If `true`, the frontend may only read `import.meta.env.DEV/PROD/MODE/BASE_URL/SSR` |
 | `envTemplates` | `[]` | Extra names of committed value-less templates (e.g. `.env.master`): neither `env-tracked` nor the hooks treat them as secrets |
+| `secretScanAllow` | `[]` | Files or folders `scan-secrets` doesn't scan because they hold known fake values (e.g. test PEM keys inside a JSON, where `secret-scan: ignore` can't go). Always listed in the output |
 | `copyAllIsError` | `false` | If `true`, `COPY . .` goes from a warning to an error |
 | `disable` | `[]` | Disabled rule ids. **Only with a reason documented** in the same file |
 
