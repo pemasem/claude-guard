@@ -1,0 +1,7 @@
+# claude-guard: añade este paso a tu bitbucket-pipelines.yml (en pull-requests y en tus ramas principales).
+- step:
+    name: claude-guard — seguridad del despliegue y secretos
+    image: node:22
+    script:
+      - node .claude-guard/check-deploy-safety.mjs
+      - node .claude-guard/scan-secrets.mjs

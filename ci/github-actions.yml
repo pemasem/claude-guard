@@ -1,0 +1,20 @@
+# claude-guard: seguridad del despliegue y escaneo de secretos en cada push y pull request.
+# Copiado por `node install.mjs <proyecto> --ci github` en .github/workflows/claude-guard.yml.
+name: claude-guard
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  claude-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Seguridad del despliegue
+        run: node .claude-guard/check-deploy-safety.mjs
+      - name: Escaneo de secretos
+        run: node .claude-guard/scan-secrets.mjs

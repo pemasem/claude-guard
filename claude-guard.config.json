@@ -1,0 +1,4 @@
+{
+  "_info": "Configuración del propio repositorio de claude-guard: el código, los tests y la documentación nombran los patrones que detectan.",
+  "allowMention": ["docs/", "test/", "hooks/", "checks/", "templates/", "README.md", "README.en.md", "CONTRIBUTING.md", "CHANGELOG.md", "install.mjs", "claude-guard.config.json"]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "claude-guard",
+  "version": "0.1.0",
+  "description": "Hooks de Claude Code y comprobadores de CI para no desplegar servidores de desarrollo ni filtrar secretos.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node checks/check-deploy-safety.mjs && node checks/scan-secrets.mjs"
+  }
+}

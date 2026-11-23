@@ -1,0 +1,19 @@
+# Changelog
+
+## Sin publicar / Unreleased
+
+## 0.1.0 — 2026-11-23
+
+Primera versión, a raíz del incidente [2026-11-vite-dev-server](docs/incidentes/2026-11-vite-dev-server.md).
+
+- Hooks de Claude Code: `guard-bash`, `protect-files` y `post-edit`.
+- `check-deploy-safety`:
+  - Dockerfile de producción (`NODE_ENV`, sin servidor de desarrollo, sin root, sin secretos en `ENV`/`ARG`, build del frontend, solo dependencias de producción);
+  - `.dockerignore`;
+  - configuración de Vite;
+  - variables públicas con secreto (`VITE_`, `NEXT_PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`, `PUBLIC_`, `NUXT_PUBLIC_`);
+  - SDK de IA en el frontend;
+  - `.env` versionados;
+  - import estático de vite en el servidor.
+- `scan-secrets` ligero.
+- Instalador idempotente con `--dry-run`, `--claude-md`, `--ci github|bitbucket` y `uninstall`.
