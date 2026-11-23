@@ -23,7 +23,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | Id | Rule | Why |
 |---|---|---|
 | `dockerignore-missing` | If there's a Dockerfile, a `.dockerignore` exists | Without it, `.env`, `.git` and local data go into the image. |
-| `dockerignore-env` | Excludes `**/.env` and `**/.env.*` and never re-includes them with `!` (except `.env.example`) | A `.env` inside the image can be read as soon as anything serves files. |
+| `dockerignore-env` | Excludes `**/.env` and `**/.env.*` (or `**/.env_*`) and never re-includes them with `!` (except templates such as `.env.example`) | A `.env` inside the image can be read as soon as anything serves files. |
 | `dockerignore-git` | Excludes `.git` | History can hold old secrets and exposes the code. |
 | `dockerignore-node-modules` | Excludes `node_modules` | Avoids host binaries and dev packages. |
 
@@ -43,7 +43,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | `public-secret-var` | No `VITE_*`, `NEXT_PUBLIC_*`, `REACT_APP_*`, `EXPO_PUBLIC_*`, `PUBLIC_*` or `NUXT_PUBLIC_*` variable with a secret-like name (KEY, SECRET, TOKEN, PASSWORD…) in any file (code, README, `.env.example`, CI) | These prefixes mean "publish me to the browser". A key with that name is a public key. |
 | `frontend-ai-sdk` | The frontend doesn't import AI SDKs (`@google/genai`, `openai`, `@anthropic-ai/sdk`, `groq-sdk`, `@mistralai/*`…) | To call the provider from the browser, the key has to be in the browser. |
 | `frontend-env` | (with `strictImportMetaEnv`) The frontend reads no custom environment variables | Everything the browser reads is public. This stops someone from adding "just one". |
-| `env-tracked` | No committed `.env` (except `.env.example`) | Once in git, the secret stays in the history and has to be rotated. |
+| `env-tracked` | No committed env file (`.env`, `.env.local`, `.env_prod`, `.env-staging`, `prod.env`…), except templates (`.example/.sample/.template/.dist`, with `.`, `_` or `-`) and those listed in `envTemplates` | Once in git, the secret stays in the history and has to be rotated. Your own template names (`.env.master`) go in `envTemplates`. |
 | `server-entry` / `server-static-vite` | (with `serverEntry`) The server imports `vite` only dynamically, inside the development branch | The production image doesn't need vite and can't start it by mistake. |
 
 ## guard-bash (commands)
@@ -56,7 +56,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 | `--no-verify` and `--no-gpg-sign` | Skipping a hook hides the problem. |
 | `npm audit fix --force` | Pulls in uncontrolled major versions. |
 | `DROP TABLE`/`DATABASE`/`SCHEMA` and `TRUNCATE TABLE` | Destructive; migrations should be additive. |
-| `cat`/`type`/`grep`/… on `.env*` (except `.env.example`) | The contents would end up in the conversation and the logs. |
+| `cat`/`type`/`Get-Content`/`grep`/… on env files (`.env`, `.env_prod`, `.env-staging`, `prod.env`…; except templates and `envTemplates`) | The contents would end up in the conversation and the logs. |
 | `printenv`, `env`, `Get-ChildItem env:` and `/proc/self/environ` | Same as above, with every variable at once. |
 | `VITE_…KEY=` and similar (assigning public variables that hold secrets) | See `public-secret-var`. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | They expose the dev server to the Internet. |
@@ -66,7 +66,7 @@ Every check has an id. If you really need to, disable it with `"disable": ["id"]
 
 | Action | Files | Why |
 |---|---|---|
-| Blocks reading and editing | `.env*` (except `.env.example/.sample/.template/.dist`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secrets. |
+| Blocks reading and editing | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (except `.example/.sample/.template/.dist` templates, with `.`, `_` or `-`, and `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secrets. |
 | Blocks editing | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` and `bun.lockb` | The package manager regenerates them. |
 | Asks for confirmation | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` and `claude-guard.config.json` | They are the safeguards themselves: they aren't loosened without the user seeing it. |
 

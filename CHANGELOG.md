@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- Ficheros de entorno con otros nombres (`.env_local`, `.env_prod`, `.env-staging`, `prod.env`) protegidos en `protect-files`, `guard-bash` (incluido `Get-Content`/`gc`/`Select-String`), `env-tracked`, `dockerignore-env` y la lista de denegaciones del instalador. Nueva clave `envTemplates` para plantillas propias (`.env.master`).
+
 ## 0.1.0 — 2026-11-23
 
 Primera versión, a raíz del incidente [2026-11-vite-dev-server](docs/incidentes/2026-11-vite-dev-server.md).

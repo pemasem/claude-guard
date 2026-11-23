@@ -23,7 +23,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | Id | Regla | Por qué |
 |---|---|---|
 | `dockerignore-missing` | Si hay Dockerfile, existe un `.dockerignore` | Sin él, entran en la imagen `.env`, `.git` y datos locales. |
-| `dockerignore-env` | Excluye `**/.env` y `**/.env.*`, y no los vuelve a incluir con `!` (salvo `.env.example`) | Un `.env` dentro de la imagen se puede leer en cuanto algo sirva ficheros. |
+| `dockerignore-env` | Excluye `**/.env` y `**/.env.*` (o `**/.env_*`), y no los vuelve a incluir con `!` (salvo plantillas como `.env.example`) | Un `.env` dentro de la imagen se puede leer en cuanto algo sirva ficheros. |
 | `dockerignore-git` | Excluye `.git` | El historial puede contener secretos antiguos y expone el código. |
 | `dockerignore-node-modules` | Excluye `node_modules` | Evita binarios del host y paquetes de desarrollo. |
 
@@ -43,7 +43,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | `public-secret-var` | Ninguna variable `VITE_*`, `NEXT_PUBLIC_*`, `REACT_APP_*`, `EXPO_PUBLIC_*`, `PUBLIC_*` o `NUXT_PUBLIC_*` con nombre de secreto (KEY, SECRET, TOKEN, PASSWORD…) en ningún fichero (código, README, `.env.example`, CI) | Esos prefijos significan "publícame en el navegador". Una clave con ese nombre es una clave pública. |
 | `frontend-ai-sdk` | El frontend no importa SDK de IA (`@google/genai`, `openai`, `@anthropic-ai/sdk`, `groq-sdk`, `@mistralai/*`…) | Para llamar al proveedor desde el navegador, la clave tiene que estar en el navegador. |
 | `frontend-env` | (con `strictImportMetaEnv`) El frontend no lee variables de entorno propias | Todo lo que lee el navegador es público. Así se evita que alguien añada "solo una". |
-| `env-tracked` | Ningún `.env` versionado (salvo `.env.example`) | Una vez en git, el secreto queda en el historial: hay que rotarlo. |
+| `env-tracked` | Ningún fichero de entorno versionado (`.env`, `.env.local`, `.env_prod`, `.env-staging`, `prod.env`…), salvo plantillas (`.example/.sample/.template/.dist`, con `.`, `_` o `-`) y las de `envTemplates` | Una vez en git, el secreto queda en el historial: hay que rotarlo. Las plantillas propias con otro nombre (`.env.master`) se declaran en `envTemplates`. |
 | `server-entry` / `server-static-vite` | (con `serverEntry`) El servidor importa `vite` solo dinámicamente, dentro de la rama de desarrollo | La imagen de producción no necesita vite, ni puede arrancarlo por error. |
 
 ## guard-bash (comandos)
@@ -56,7 +56,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 | `--no-verify` y `--no-gpg-sign` | Saltarse un hook oculta el problema. |
 | `npm audit fix --force` | Mete versiones mayores sin control. |
 | `DROP TABLE`/`DATABASE`/`SCHEMA` y `TRUNCATE TABLE` | Destructivo; las migraciones deben ser aditivas. |
-| `cat`/`type`/`grep`/… sobre `.env*` (salvo `.env.example`) | El contenido acabaría en la conversación y en los logs. |
+| `cat`/`type`/`Get-Content`/`grep`/… sobre ficheros de entorno (`.env`, `.env_prod`, `.env-staging`, `prod.env`…; salvo plantillas y `envTemplates`) | El contenido acabaría en la conversación y en los logs. |
 | `printenv`, `env`, `Get-ChildItem env:` y `/proc/self/environ` | Igual que lo anterior, con todas las variables a la vez. |
 | `VITE_…KEY=` y similares (asignar variables públicas con secreto) | Ver `public-secret-var`. |
 | `ngrok`, `cloudflared tunnel`, `localtunnel`, `tailscale funnel`… | Exponen el servidor de desarrollo a Internet. |
@@ -66,7 +66,7 @@ Cada regla del comprobador lleva un id. Si hiciera falta, se desactiva con `"dis
 
 | Acción | Ficheros | Por qué |
 |---|---|---|
-| Bloquea leer y editar | `.env*` (salvo `.env.example/.sample/.template/.dist`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secretos. |
+| Bloquea leer y editar | `.env`, `.env.*`, `.env_*`, `.env-*`, `*.env` (salvo plantillas `.example/.sample/.template/.dist`, con `.`, `_` o `-`, y `envTemplates`), `*.pem`, `*.key`, `*.p12`, `id_rsa`, `credentials*.json`, `service-account*.json` | Secretos. |
 | Bloquea editar | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` y `bun.lockb` | Se regeneran con el gestor de paquetes. |
 | Pide confirmación | `.claude/hooks/claude-guard/`, `.claude-guard/`, `.claude/settings.json` y `claude-guard.config.json` | Son las propias barreras: no se relajan sin que el usuario lo vea. |
 

@@ -102,3 +102,10 @@ test('el proyecto instalado se puede comprobar con el comprobador copiado', () =
   const r = run(path.join(dir, '.claude-guard', 'check-deploy-safety.mjs'), []);
   assert.equal(r.status, 0, r.out);
 });
+
+test('el instalador deniega también .env_* y .env-*', () => {
+  const dir = tmpDir();
+  run(path.join(PKG, 'install.mjs'), [dir]);
+  const deny = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8')).permissions.deny;
+  for (const d of ['Read(**/.env_*)', 'Read(**/.env-*)', 'Edit(**/.env_*)', 'Read(**/*.env)']) assert.ok(deny.includes(d), d);
+});

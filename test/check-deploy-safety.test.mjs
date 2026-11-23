@@ -148,3 +148,30 @@ test('sin Dockerfile no se exige .dockerignore', () => {
   fs.rmSync(path.join(root, '.dockerignore'));
   assert.equal(check().status, 0);
 });
+
+test('variantes .env versionadas (.env_prod, prod.env) y envTemplates', () => {
+  git(root, 'init', '-q');
+  put(root, 'src/.env_prod', 'X=1\n');
+  put(root, 'prod.env', 'X=1\n');
+  put(root, 'src/.env.master', 'X=\n');
+  put(root, '.env_example', 'X=\n');
+  git(root, 'add', '-A');
+  const r = check();
+  assert.match(r.out, /\[env-tracked\] src\/\.env_prod/);
+  assert.match(r.out, /\[env-tracked\] prod\.env/);
+  assert.match(r.out, /\[env-tracked\] src\/\.env\.master/);
+  assert.doesNotMatch(r.out, /\[env-tracked\] \.env_example/);
+  put(root, 'claude-guard.config.json', JSON.stringify({ envTemplates: ['.env.master'] }));
+  assert.doesNotMatch(check().out, /\.env\.master/);
+});
+
+test('.dockerignore acepta **/.env_* y no se puede re-incluir .env_prod', () => {
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n');
+  assert.equal(check().status, 0);
+  put(root, '.dockerignore', '**/.env\n.git\n**/node_modules\n');
+  assert.match(check().out, /\[dockerignore-env\]/);
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n!.env_prod\n');
+  assert.match(check().out, /no re-incluyas/);
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n!.env_example\n');
+  assert.equal(check().status, 0);
+});

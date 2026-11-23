@@ -30,6 +30,7 @@ const DEFAULTS = {
   serverDirs: ['server', 'api', 'backend', 'functions', 'src/server', 'src/api', 'app/api', 'src/app/api', 'pages/api', 'src/pages/api', 'scripts'],
   serverEntry: null,
   allowMention: ['docs/', 'test/', 'tests/', '__tests__/', '.claude-guard/', '.claude/hooks/claude-guard/', 'CHANGELOG.md', 'claude-guard.config.json'],
+  envTemplates: [],
   strictImportMetaEnv: false,
   copyAllIsError: false,
   disable: [],
@@ -58,6 +59,14 @@ const SECRET_WORDS = 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|PRIVATE|AU
 const PUBLIC_SECRET_VAR = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})[A-Z0-9_]*(?:${SECRET_WORDS})[A-Z0-9_]*\\b`);
 const AI_SDK = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"](@google\/genai|@google\/generative-ai|openai|@anthropic-ai\/sdk|groq-sdk|@mistralai\/[\w-]+|cohere-ai|replicate)['"]/;
 const BROWSER_ENV_OK = new Set(['DEV', 'PROD', 'MODE', 'BASE_URL', 'SSR']);
+// Misma definición que isEnvFile de hooks/lib.mjs (este comprobador es autónomo, también corre en CI).
+function isEnvFile(file) {
+  const f = file.replace(/\\/g, '/');
+  const base = f.split('/').pop();
+  if (!/^(\.env([._-].+)?|.+\.env)$/i.test(base)) return false;
+  if (/[._-](example|sample|template|dist)$/i.test(base)) return false;
+  return !(config.envTemplates || []).some((t) => f === t || f.endsWith('/' + t));
+}
 const TEXT_EXT = /\.(m?[jt]sx?|c[jt]s|json|md|mdx|ya?ml|html|css|scss|sh|ps1|txt|example|sample|sql|toml|ini|cfg|conf|vue|svelte|astro|py|rb|go|java|kt|cs|php|tf|properties)$|(^|\/)(Dockerfile[^/]*|\.dockerignore|\.gitignore|\.env[^/]*|Makefile|Procfile)$/i;
 
 const problems = [];
@@ -137,12 +146,12 @@ function checkDockerignore() {
   if (s === null) return fail('dockerignore-missing', where, 'no existe: todo el contexto (incluidos .env y .git) entraría en la imagen');
   const lines = s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const has = (...alts) => alts.some((a) => lines.includes(a));
-  if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
-  if (!has('.env.*', '**/.env.*', '.env*', '**/.env*')) fail('dockerignore-env', where, 'falta `**/.env.*` (.env.local, .env.production…)');
+  if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env', '**/*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
+  if (!has('.env.*', '**/.env.*', '.env_*', '**/.env_*', '.env*', '**/.env*')) fail('dockerignore-env', where, 'falta `**/.env.*` o `**/.env_*` (.env.local, .env_prod…)');
   if (!has('.git', '**/.git', '.git/', '**/.git/')) fail('dockerignore-git', where, 'falta `.git` (historial con posibles secretos antiguos)');
   if (!has('node_modules', '**/node_modules', 'node_modules/', '**/node_modules/')) fail('dockerignore-node-modules', where, 'falta `**/node_modules` (binarios del host y paquetes de desarrollo)');
   for (const l of lines) {
-    if (/^!.*\.env/.test(l) && !/\.env\.(example|sample|template)$/.test(l)) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
+    if (/^!.*\.env/.test(l) && isEnvFile(l.slice(1))) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
   }
 }
 
@@ -196,7 +205,7 @@ function checkFiles(extra) {
   const inRepoRoot = tracked !== null && fs.existsSync(path.join(root, '.git'));
   const files = new Set([...(inRepoRoot ? tracked : walk(root)), ...extra]);
   for (const f of files) {
-    if (/(^|\/)\.env(\.[^/]*)?$/.test(f) && !/\.env\.(example|sample|template|dist)$/.test(f)) {
+    if (isEnvFile(f)) {
       if (inRepoRoot && tracked.includes(f)) fail('env-tracked', f, 'fichero .env versionado: los secretos nunca van al repositorio (sácalo, añádelo a .gitignore y rota sus claves)');
       continue;
     }

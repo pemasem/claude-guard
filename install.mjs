@@ -25,10 +25,11 @@ const HOOKS = [
   { event: 'PreToolUse', matcher: 'Read|Edit|Write|MultiEdit|NotebookEdit', file: 'protect-files.mjs', timeout: 10 },
   { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit', file: 'post-edit.mjs', timeout: 30 },
 ];
-const DENY = ['Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Edit(**/.env.*)', 'Bash(git push --force*)', 'Bash(git push -f*)', 'Bash(npm audit fix --force*)'];
+const DENY = ['Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Edit(**/.env.*)', 'Read(**/.env_*)', 'Read(**/.env-*)', 'Read(**/*.env)', 'Edit(**/.env_*)', 'Edit(**/.env-*)', 'Edit(**/*.env)', 'Bash(git push --force*)', 'Bash(git push -f*)', 'Bash(npm audit fix --force*)'];
 const DEFAULT_CONFIG = {
   _info: 'claude-guard: ajusta las rutas a tu proyecto. "disable" solo con una razón documentada aquí. Ver README de claude-guard.',
   protectedBranches: ['main', 'master', 'develop'],
+  envTemplates: [],
   dockerfiles: ['Dockerfile'],
   dockerignore: '.dockerignore',
   viteConfigs: ['vite.config.ts', 'vite.config.js', 'vite.config.mjs', 'vite.config.mts'],

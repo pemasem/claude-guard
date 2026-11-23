@@ -94,3 +94,30 @@ test('post-edit: bloquea un secreto o una variable pública con secreto tras edi
   assert.equal(r2.status, 2);
   assert.match(r2.stderr, /public-secret-var/);
 });
+
+test('variantes de nombre de .env: .env_local, .env-staging, prod.env', () => {
+  const dir = tmpDir();
+  for (const c of ['cat src/.env_local', 'Get-Content src/.env_prod', 'type src\\.env-staging', 'cat config/prod.env', 'grep KEY .env_dev', 'gc .env.local', 'Select-String X -Path .env_prod']) {
+    assert.equal(bash(c, dir).status, 2, c);
+  }
+  for (const c of ['cat .env.example', 'cat .env_example', 'cat .env-sample', 'cat prod.env.template', 'cat src/environment.ts', 'cat .envrc.md', 'ls .env_prod']) {
+    assert.equal(bash(c, dir).status, 0, c);
+  }
+  for (const f of ['/p/src/.env_local', '/p/.env_dev', '/p/.env_prod', '/p/prod.env', '/p/.env-staging', 'C:\\p\\src\\.env_prod']) {
+    assert.equal(file('Read', f, dir).status, 2, f);
+    assert.equal(file('Edit', f, dir).status, 2, f);
+  }
+  for (const f of ['/p/.env.example', '/p/.env_example', '/p/.env-sample', '/p/.env_template', '/p/prod.env.dist', '/p/src/environment.ts', '/p/.envrc']) {
+    assert.equal(file('Read', f, dir).status, 0, f);
+  }
+});
+
+test('envTemplates: plantillas propias versionadas (.env.master) legibles', () => {
+  const dir = tmpDir();
+  assert.equal(file('Read', '/p/src/.env.master', dir).status, 2);
+  assert.equal(bash('cat src/.env.master', dir).status, 2);
+  put(dir, 'claude-guard.config.json', JSON.stringify({ envTemplates: ['.env.master'] }));
+  assert.equal(file('Read', '/p/src/.env.master', dir).status, 0);
+  assert.equal(bash('cat src/.env.master', dir).status, 0);
+  assert.equal(file('Read', '/p/src/.env_prod', dir).status, 2);
+});
