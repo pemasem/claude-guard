@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- `guard-bash`: bloquea los comandos que vacían o revierten toda la base de datos (`alembic downgrade base`, `manage.py migrate <app> zero`/`flush`, `prisma migrate reset`, `prisma db push --force-reset`, `rails db:drop`/`db:reset`, `sequelize db:migrate:undo:all`, `knex migrate:rollback --all`, `typeorm schema:drop`, `artisan migrate:fresh`/`db:wipe`…). Revertir un paso sigue permitido.
+
 - Falsos positivos de un monorepo real (FastAPI + Next.js + Caddy + Docker):
   - `dockerignore-missing` es por contexto de construcción: se busca el `.dockerignore` en la carpeta de cada Dockerfile (o `<Dockerfile>.dockerignore`) y, si hay `docker-compose*.yml`, en el `context:` de cada servicio. La opción `dockerignore` sigue valiendo para la raíz. Nueva regla `dockerignore-env-in-context`: error si el contexto tiene un `.env*` real, el Dockerfile hace `COPY . …` y ningún `.dockerignore` lo excluye.
   - `docker-prod-deps` solo revisa la etapa final (y las que hereda): si solo copia artefactos con `COPY --from=…` (p. ej. `.next/standalone`) y no instala, no es error.
