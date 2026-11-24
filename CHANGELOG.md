@@ -3,6 +3,8 @@
 ## Sin publicar / Unreleased
 
 - Falsos positivos de un monorepo real (FastAPI + Next.js + Caddy + Docker):
+  - `default-secret-value` no avisa de comparaciones (`startswith`/`endswith`/`includes`/`==`/`!=`/`===`/`!==`/`in`): son la guarda que rechaza el valor por defecto. Si el mismo fichero (o `serverEntry`) contiene esa guarda, la asignación por defecto tampoco avisa; sin guarda, sigue avisando.
+  - `dockerignore-git` solo se exige si el contexto es la raíz del proyecto o contiene `.git`; `dockerignore-node-modules`, solo si contiene `package.json` o `node_modules`. `dockerignore-env` se exige siempre.
   - `dockerignore-missing` es por contexto de construcción: se busca el `.dockerignore` en la carpeta de cada Dockerfile (o `<Dockerfile>.dockerignore`) y, si hay `docker-compose*.yml`, en el `context:` de cada servicio. La opción `dockerignore` sigue valiendo para la raíz. Nueva regla `dockerignore-env-in-context`: error si el contexto tiene un `.env*` real, el Dockerfile hace `COPY . …` y ningún `.dockerignore` lo excluye.
   - `docker-prod-deps` solo revisa la etapa final (y las que hereda): si solo copia artefactos con `COPY --from=…` (p. ej. `.next/standalone`) y no instala, no es error.
   - `public-secret-var` (check y `guard-bash`) no marca nombres con `PUBLISHABLE` o `ANON` como palabra (`VITE_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`).

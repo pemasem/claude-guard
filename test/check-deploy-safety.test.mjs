@@ -512,3 +512,80 @@ test('frontend-token-storage: token o sesión en localStorage/sessionStorage', (
   put(root, 'src/components/Login.tsx', "export const save = () => { localStorage.setItem('theme', 'dark'); const t = localStorage.getItem('access_token'); };\n");
   assert.doesNotMatch(check().out, /frontend-token-storage/);
 });
+
+test('default-secret-value: una comparación (guarda) no es un valor por defecto', () => {
+  const guards = [
+    ['backend/app/g1.py', 'if ajustes.es_produccion and ajustes.secret_key.startswith("cambiame"):\n    raise RuntimeError("secreto por defecto")\n'],
+    ['backend/app/g2.py', 'if settings.secret_key == "changeme":\n    raise SystemExit(1)\n'],
+    ['backend/app/g3.py', 'if settings.secret_key != "changeme": pass\nif settings.secret_key.endswith("secret"): pass\n'],
+    ['backend/app/g4.py', 'if settings.secret_key in ("secret", "changeme", "dev-secret"):\n    raise SystemExit(1)\n'],
+    ['server/g5.js', 'if (secret === "changeme") throw new Error("secreto por defecto");\n'],
+    ['server/g6.js', "if (config.sessionSecret !== 'secret') start();\nif (['changeme', 'secret'].includes(config.sessionSecret)) throw new Error('x');\n"],
+    ['server/g7.js', "if (['changeme', 'secret'].includes(jwtSecret)) throw new Error('x');\n"],
+  ];
+  for (const [file, body] of guards) put(root, file, body);
+  const r = check();
+  assert.doesNotMatch(r.out, /default-secret-value/, r.out);
+});
+
+test('default-secret-value: sigue avisando de una asignación por defecto sin guarda', () => {
+  put(root, 'backend/app/a.py', 'secret_key: str = "cambiame-en-produccion"\n');
+  put(root, 'server/b.js', 'const secret = process.env.SECRET_KEY || "changeme";\nif (secret.length < 2) throw new Error("x");\n');
+  const r = check();
+  assert.match(r.out, /\[default-secret-value\] backend\/app\/a\.py/);
+  assert.match(r.out, /\[default-secret-value\] server\/b\.js/);
+});
+
+test('default-secret-value: la asignación por defecto con guarda en el mismo fichero no avisa', () => {
+  put(root, 'backend/app/config.py', [
+    'secret_key: str = "cambiame-en-produccion"',
+    'def validar(ajustes):',
+    '    if ajustes.es_produccion and ajustes.secret_key.startswith("cambiame"):',
+    '        raise RuntimeError("secreto por defecto")',
+    '',
+  ].join('\n'));
+  assert.doesNotMatch(check().out, /default-secret-value/);
+  // La guarda es de OTRO valor: la asignación sigue avisando.
+  put(root, 'backend/app/config.py', 'secret_key: str = "cambiame-en-produccion"\nif secret_key == "changeme": raise SystemExit(1)\n');
+  assert.match(check().out, /\[default-secret-value\] backend\/app\/config\.py/);
+});
+
+test('default-secret-value: la guarda en serverEntry cubre la asignación de otro fichero', () => {
+  put(root, 'backend/app/config.py', 'secret_key: str = "cambiame-en-produccion"\n');
+  put(root, 'backend/app/main.py', 'if cfg.secret_key.startswith("cambiame"):\n    raise RuntimeError("x")\n');
+  assert.match(check().out, /\[default-secret-value\] backend\/app\/config\.py/);
+  put(root, 'claude-guard.config.json', JSON.stringify({ serverEntry: 'backend/app/main.py' }));
+  assert.doesNotMatch(check().out, /default-secret-value/);
+});
+
+test('.dockerignore por contexto: .git solo en la raíz o si el contexto tiene .git; node_modules solo con package.json', () => {
+  monorepo();
+  put(root, 'backend/.dockerignore', '**/.env\n**/.env.*\n'); // contexto Python de subcarpeta: sin .git ni node_modules
+  put(root, 'web/.dockerignore', '**/.env\n**/.env.*\n**/node_modules\n');
+  put(root, 'web/package.json', '{}\n');
+  let r = check();
+  assert.doesNotMatch(r.out, /dockerignore-git/, r.out);
+  assert.doesNotMatch(r.out, /dockerignore-node-modules/, r.out);
+  // Contexto con package.json y sin node_modules en el .dockerignore: falla.
+  put(root, 'web/.dockerignore', '**/.env\n**/.env.*\n');
+  assert.match(check().out, /\[dockerignore-node-modules\] web\/\.dockerignore/);
+  // Contexto con node_modules (sin package.json): falla.
+  put(root, 'backend/node_modules/x/index.js', '\n');
+  assert.match(check().out, /\[dockerignore-node-modules\] backend\/\.dockerignore/);
+  fs.rmSync(path.join(root, 'backend/node_modules'), { recursive: true });
+  // Contexto con .git: falla.
+  put(root, 'backend/.git/HEAD', 'ref: refs/heads/main\n');
+  assert.match(check().out, /\[dockerignore-git\] backend\/\.dockerignore/);
+  fs.rmSync(path.join(root, 'backend/.git'), { recursive: true });
+  assert.doesNotMatch(check().out, /\[dockerignore-git\] backend/);
+});
+
+test('.dockerignore por contexto: dockerignore-env se exige siempre y la raíz sigue exigiendo .git', () => {
+  // En la raíz del proyecto se exige .git aunque no haya .git ni package.json.
+  put(root, '.dockerignore', '**/.env\n**/.env.*\n**/node_modules\n');
+  assert.match(check().out, /\[dockerignore-git\] \.dockerignore/);
+  monorepo();
+  put(root, 'backend/.dockerignore', '\n');
+  put(root, 'web/.dockerignore', GOOD_IGNORE);
+  assert.match(check().out, /\[dockerignore-env\] backend\/\.dockerignore/);
+});
