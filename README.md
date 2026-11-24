@@ -43,7 +43,7 @@ El instalador:
 - **fusiona** sus entradas en `.claude/settings.json`: no borra nada de lo que ya hubiera, guarda una copia `settings.json.bak-*` y no duplica nada si lo ejecutas otra vez;
 - crea `claude-guard.config.json` si no existe;
 - con `--claude-md`, añade a `CLAUDE.md` una sección de reglas entre marcadores;
-- con `--ci`, crea el workflow de GitHub Actions o deja el fragmento para Bitbucket Pipelines.
+- con `--ci`, crea el workflow de GitHub Actions o deja el fragmento para Bitbucket Pipelines. Incluye un paso opcional de auditoría de dependencias (`npm audit --omit=dev --audit-level=high` por cada `package-lock.json` y `pip-audit` si hay `requirements.txt`/`pyproject.toml`; si `pip-audit` no está, se omite sin romper).
 
 Después:
 
@@ -66,8 +66,8 @@ Para actualizar: `git pull` en `claude-guard` y vuelve a ejecutar el instalador.
 | Clave | Por defecto | Para qué |
 |---|---|---|
 | `protectedBranches` | `["main","master","develop"]` | Ramas sin push directo ni commits |
-| `dockerfiles` | `["Dockerfile"]` | Dockerfiles que se revisan. Sin Dockerfile, no se exige `.dockerignore` |
-| `dockerignore` | `".dockerignore"` | |
+| `dockerfiles` | `["Dockerfile"]` | Dockerfiles que se revisan (en un monorepo, lista cada uno: `["backend/Dockerfile","web/Dockerfile"]`). Cada uno exige el `.dockerignore` de su carpeta o del `context:` de su `docker-compose*.yml`. Sin Dockerfile, no se exige `.dockerignore` |
+| `dockerignore` | `".dockerignore"` | `.dockerignore` del contexto de la raíz del proyecto |
 | `viteConfigs` | `vite.config.{ts,js,mjs,mts}` | Si existe alguno, la imagen tiene que compilar el frontend |
 | `frontendDirs` / `frontendExtensions` | `src/components`… / `.tsx .jsx .vue .svelte .astro` | Qué cuenta como código de navegador |
 | `serverDirs` | `server`, `api`, `app/api`, `pages/api`… | Nunca cuentan como frontend (ahí sí puede haber SDK de IA) |

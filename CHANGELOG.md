@@ -2,6 +2,17 @@
 
 ## Sin publicar / Unreleased
 
+- Falsos positivos de un monorepo real (FastAPI + Next.js + Caddy + Docker):
+  - `dockerignore-missing` es por contexto de construcción: se busca el `.dockerignore` en la carpeta de cada Dockerfile (o `<Dockerfile>.dockerignore`) y, si hay `docker-compose*.yml`, en el `context:` de cada servicio. La opción `dockerignore` sigue valiendo para la raíz. Nueva regla `dockerignore-env-in-context`: error si el contexto tiene un `.env*` real, el Dockerfile hace `COPY . …` y ningún `.dockerignore` lo excluye.
+  - `docker-prod-deps` solo revisa la etapa final (y las que hereda): si solo copia artefactos con `COPY --from=…` (p. ej. `.next/standalone`) y no instala, no es error.
+  - `public-secret-var` (check y `guard-bash`) no marca nombres con `PUBLISHABLE` o `ANON` como palabra (`VITE_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`).
+  - `guard-bash`: en `grep`/`rg`/`Select-String`/`sls`/`findstr` el patrón (primer argumento sin opción y valores de `-e`/`--regexp`/`-Pattern`/`/c:`) ya no se toma por fichero: `grep -iE "^\.env|docker" .gitignore` pasa, `grep X .env` y `cat .env` siguen bloqueados.
+  - `guard-bash`: el motivo de `git reset --hard` recomienda una rama o un commit de trabajo en vez de `git stash` (peligroso con varios agentes: el índice se comparte).
+
+- `check-deploy-safety`: nuevas reglas de aviso `forwarded-ips-wildcard` (`--forwarded-allow-ips=*` / `FORWARDED_ALLOW_IPS=*`), `uvicorn-proxy-headers` (uvicorn sin `--proxy-headers` con `Caddyfile`/`nginx.conf` en el proyecto), `default-secret-value` (`secret_key = "changeme"` y similares en código de servidor), `browser-sandbox-disabled` (`chromium_sandbox=False` / `chromiumSandbox: false`) y `frontend-token-storage` (token o sesión en `localStorage`/`sessionStorage`).
+
+- CI (`ci/github-actions.yml`, `ci/bitbucket-pipelines.yml`): paso opcional de auditoría de dependencias, `npm audit --omit=dev --audit-level=high` por cada carpeta con `package-lock.json` y `pip-audit` si hay `requirements.txt`/`pyproject.toml` (se omite sin romper si no se puede instalar).
+
 - `templates/CLAUDE.section.md`: cuatro reglas de comportamiento nuevas para Claude (prevención, sin código de detección): SSRF con navegador o cliente HTTP, rutas de fichero con datos del usuario, contenido de terceros en prompts de LLM y navegadores headless con sandbox. La de no relajar reglas pasa a ser la 9.
 
 - `check-deploy-safety`: nueva regla `docker-browser-no-sandbox` (aviso por `--no-sandbox`/`--disable-setuid-sandbox` en el Dockerfile; error si además la imagen corre como root).
