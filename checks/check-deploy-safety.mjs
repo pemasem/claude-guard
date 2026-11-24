@@ -58,7 +58,19 @@ const stripHashComments = (s) => s.split('\n').filter((l) => !/^\s*#/.test(l)).j
 // Prefijos que los frameworks publican en el navegador; armados por partes para no detectarse a sí mismos.
 const PUBLIC_PREFIXES = [['VI', 'TE_'], ['NEXT', '_PUBLIC_'], ['REACT', '_APP_'], ['EXPO', '_PUBLIC_'], ['NUXT', '_PUBLIC_'], ['PUB', 'LIC_']].map((p) => p.join(''));
 const SECRET_WORDS = 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|PRIVATE|AUTH';
-const PUBLIC_SECRET_VAR = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})[A-Z0-9_]*(?:${SECRET_WORDS})[A-Z0-9_]*\\b`);
+// Claves públicas por diseño (Supabase anon, Stripe publishable…): misma definición que PUBLIC_BY_DESIGN de hooks/lib.mjs.
+const PUBLIC_BY_DESIGN = '[A-Z0-9_]*?(?:PUBLISHABLE|(?<![A-Za-z0-9])ANON(?![A-Za-z0-9]))';
+const PUBLIC_SECRET_VAR = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})(?!${PUBLIC_BY_DESIGN})[A-Z0-9_]*(?:${SECRET_WORDS})[A-Z0-9_]*\\b`);
+// Valores por defecto conocidos de secretos (en código de servidor): el servidor arrancaría con una clave que conoce todo el mundo.
+const SECRET_NAME_IN_CODE = /(?:secret[_-]?key|jwt[_-]?secret(?:[_-]?key)?|jwt[_-]?key|signing[_-]?key|session[_-]?secret|cookie[_-]?secret|app[_-]?secret|auth[_-]?secret|api[_-]?secret|encryption[_-]?key|nextauth[_-]?secret)/i;
+const KNOWN_DEFAULT_SECRET = /^(?:change[-_ ]?me|cambiame|cámbiame|secret|secretkey|super[-_]?secret|dev[-_]?secret|dev[-_]?key|insecure|unsafe|default[-_]?secret|my[-_]?secret|replace[-_ ]?me|your[-_]?secret|test[-_]?secret|password|1234\d*)(?:[-_ ][\w -]*)?$/i;
+const isTestFile = (f) => /(^|\/)(tests?|__tests__|e2e|fixtures)\/|\.(test|spec)\.[^.]+$|(^|\/)(test_[^/]*|[^/]*_test)\.py$|(^|\/)conftest\.py$/.test(f);
+const BROWSER_NO_SANDBOX_API = /\bchromium_sandbox\s*=\s*False\b|\bchromiumSandbox\s*:\s*false\b/;
+const TOKEN_IN_BROWSER_STORAGE = /\b(?:local|session)Storage\s*\.\s*setItem\s*\(\s*[^,)\n]*(?:token|jwt|auth|session)|\b(?:local|session)Storage\s*\[\s*["'`][^"'`\n]*(?:token|jwt|auth|session)[^"'`\n]*["'`]\s*\]\s*=(?!=)/i;
+const FORWARDED_ALL = /--forwarded-allow-ips[=\s"',]+\*|\bFORWARDED_ALLOW_IPS\b["']?(?:\s*[:=]\s*|\s+)["']?\*/i;
+const PROXY_FLAGS = /--proxy-headers\b|--forwarded-allow-ips\b|\bFORWARDED_ALLOW_IPS\b/i;
+const PROD_DEPS_ONLY = /npm\s+ci\b[^\n]*--(omit=dev|only=prod(uction)?|production)\b|npm\s+(install|i)\b[^\n]*--(omit=dev|production)\b|npm\s+prune\b[^\n]*--(omit=dev|production)|yarn\s+(install\b[^\n]*--production|workspaces\s+focus\b[^\n]*--production)|pnpm\s+(install\b[^\n]*--prod\b|deploy\b[^\n]*--prod\b)|NODE_ENV=production\s+npm\s+ci\b/;
+const INSTALLS_DEPS = /^\s*RUN\b(?![^\n]*(?:\s-g\b|--global\b))[^\n]*\b(?:npm\s+(?:ci|install|i)\b|yarn\s*(?:install\b|$|&&|;|--)|pnpm\s+(?:install|i)\b|bun\s+install\b)/m;
 const AI_SDK = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"](@google\/genai|@google\/generative-ai|openai|@anthropic-ai\/sdk|groq-sdk|@mistralai\/[\w-]+|cohere-ai|replicate)['"]/;
 const BROWSER_ENV_OK = new Set(['DEV', 'PROD', 'MODE', 'BASE_URL', 'SSR']);
 // Misma definición que isEnvFile de hooks/lib.mjs (este comprobador es autónomo, también corre en CI).
@@ -154,19 +166,152 @@ function checkDockerfile(file) {
   if (isNode && viteConfigPath && !/\b(npm|yarn|pnpm|bun)\s+(run\s+)?build\b|\bvite\s+build\b/.test(code)) {
     fail('docker-frontend-build', where, 'hay configuración de Vite pero la imagen no compila el frontend (`npm run build`): se acabaría sirviendo con el servidor de desarrollo');
   }
-  if (isNode && !/npm\s+ci\b[^\n]*--(omit=dev|only=prod(uction)?|production)\b|npm\s+(install|i)\b[^\n]*--(omit=dev|production)\b|npm\s+prune\b[^\n]*--(omit=dev|production)|yarn\s+(install\b[^\n]*--production|workspaces\s+focus\b[^\n]*--production)|pnpm\s+(install\b[^\n]*--prod\b|deploy\b[^\n]*--prod\b)|NODE_ENV=production\s+npm\s+ci\b/.test(code)) {
-    fail('docker-prod-deps', where, 'la imagen final debería instalar solo dependencias de producción (`npm ci --omit=dev` o equivalente): las devDependencies incluyen servidores de desarrollo');
+  // Solo cuenta la etapa final (y las que hereda con `FROM etapa`): si solo copia artefactos (`COPY --from=…`, p. ej.
+  // `.next/standalone`) y no instala nada, no hay devDependencies que revisar.
+  if (isNode) {
+    const finalText = finalStageText(code);
+    const onlyCopiesArtifacts = /^\s*COPY\s+[^\n]*--from=/im.test(finalText) && !INSTALLS_DEPS.test(finalText);
+    if (!PROD_DEPS_ONLY.test(finalText) && !onlyCopiesArtifacts) {
+      fail('docker-prod-deps', where, 'la etapa final debería instalar solo dependencias de producción (`npm ci --omit=dev` o equivalente) o limitarse a copiar artefactos con `COPY --from=…`: las devDependencies incluyen servidores de desarrollo');
+    }
   }
-  return true;
+  // `COPY . …` / `ADD . …` desde el contexto (no desde otra etapa): lo usa la comprobación del contexto.
+  const copiesContext = code.split('\n').some((l) => /^\s*(?:COPY|ADD)\s+(?:--(?!from\b)\S+\s+)*\.\/?\s+\S+/i.test(l));
+  return { code, copiesContext };
 }
 
+// Etapas de un Dockerfile multi-etapa: [{ from, name, lines }].
+function stagesOf(code) {
+  const stages = [];
+  for (const line of code.split('\n')) {
+    const m = /^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?/i.exec(line);
+    if (m) stages.push({ from: m[1].toLowerCase(), name: (m[2] || '').toLowerCase(), lines: [line] });
+    else if (stages.length) stages[stages.length - 1].lines.push(line);
+  }
+  return stages;
+}
+// Texto de la etapa final más el de las etapas de las que parte (`FROM build AS runner` hereda lo instalado en `build`).
+function finalStageText(code) {
+  const stages = stagesOf(code);
+  if (!stages.length) return code;
+  let i = stages.length - 1;
+  let text = stages[i].lines.join('\n');
+  const seen = new Set([i]);
+  for (;;) {
+    const parent = stages.findIndex((s, j) => j < i && s.name && s.name === stages[i].from);
+    if (parent < 0 || seen.has(parent)) break;
+    seen.add(parent);
+    text = stages[parent].lines.join('\n') + '\n' + text;
+    i = parent;
+  }
+  return text;
+}
 // ---------------------------------------------------------------------------------------------------------------
 // 2) .dockerignore: secretos, historial y dependencias del host fuera de la imagen.
 // ---------------------------------------------------------------------------------------------------------------
-function checkDockerignore() {
-  const where = config.dockerignore;
-  const s = read(path.join(root, where));
-  if (s === null) return fail('dockerignore-missing', where, 'no existe: todo el contexto (incluidos .env y .git) entraría en la imagen');
+// Cada Dockerfile se construye con su contexto: la carpeta del Dockerfile o, si un docker-compose*.yml lo construye,
+// el `context:` de cada servicio. El .dockerignore es el del contexto (o `<Dockerfile>.dockerignore` junto al Dockerfile).
+// En la raíz del proyecto vale la opción `dockerignore` de la configuración.
+const unquote = (v) => v.replace(/\s+#.*$/, '').trim().replace(/^(["'])(.*)\1$/, '$2');
+function composeFiles() {
+  try {
+    return fs.readdirSync(root).filter((f) => /^(?:docker-)?compose(?:[.-][\w.-]*)?\.ya?ml$/i.test(f));
+  } catch {
+    return [];
+  }
+}
+function composeBuilds() {
+  const out = [];
+  for (const name of composeFiles()) {
+    const text = read(path.join(root, name));
+    if (text === null) continue;
+    const lines = stripHashComments(text).split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(\s*)build:\s*(.*?)\s*$/.exec(lines[i]);
+      if (!m) continue;
+      let context = unquote(m[2]);
+      let dockerfile = null;
+      if (!context) {
+        for (let j = i + 1; j < lines.length; j++) {
+          if (!lines[j].trim()) continue;
+          if (/^\s*/.exec(lines[j])[0].length <= m[1].length) break;
+          const kv = /^\s*(context|dockerfile):\s*(.*?)\s*$/.exec(lines[j]);
+          if (kv && kv[1] === 'context') context = unquote(kv[2]);
+          else if (kv) dockerfile = unquote(kv[2]);
+        }
+      }
+      if (!context || /\$|^[a-z][\w+.-]*:\/\//i.test(context)) continue;
+      const ctxAbs = path.resolve(root, context);
+      out.push({ compose: name, ctxAbs, dockerfileAbs: path.resolve(ctxAbs, dockerfile || 'Dockerfile') });
+    }
+  }
+  return out;
+}
+
+function contextsOf(file, builds) {
+  const abs = path.resolve(root, file);
+  const ctxs = builds.filter((b) => b.dockerfileAbs === abs).map((b) => b.ctxAbs);
+  return [...new Set(ctxs.length ? ctxs : [path.dirname(abs)])];
+}
+
+// Patrones de .dockerignore (siempre anclados a la raíz del contexto; `**/` cubre cualquier profundidad).
+function dockerPattern(p) {
+  const g = p.replace(/^\/+/, '').replace(/\/+$/, '');
+  let re = '';
+  for (let i = 0; i < g.length; i++) {
+    const c = g[i];
+    if (c === '*' && g[i + 1] === '*') {
+      i++;
+      if (g[i + 1] === '/') {
+        i++;
+        re += '(?:.*/)?';
+      } else re += '.*';
+    } else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
+}
+function excludedByDockerignore(lines, relPath) {
+  const parts = relPath.split('/');
+  let excluded = false;
+  for (const l of lines) {
+    const neg = l.startsWith('!');
+    const re = dockerPattern(neg ? l.slice(1) : l);
+    if (parts.some((_, i) => re.test(parts.slice(0, i + 1).join('/')))) excluded = !neg;
+  }
+  return excluded;
+}
+
+function checkDockerContexts(dockerfiles) {
+  const builds = composeBuilds();
+  const seen = new Set();
+  for (const d of dockerfiles) {
+    for (const ctxAbs of contextsOf(d.file, builds)) {
+      const ctxRel = rel(ctxAbs);
+      const candidates = [`${d.file}.dockerignore`, ctxRel ? `${ctxRel}/.dockerignore` : config.dockerignore];
+      const found = candidates.find((c) => read(path.join(root, c)) !== null);
+      const where = found || candidates[1];
+      const s = found ? read(path.join(root, found)) : null;
+      if (!seen.has(where)) {
+        seen.add(where);
+        if (s === null) fail('dockerignore-missing', where, 'no existe: todo el contexto de construcción (incluidos .env y .git) entraría en la imagen. En un monorepo, cada Dockerfile necesita el .dockerignore de su contexto');
+        else checkDockerignore(where, s);
+      }
+      // Un .env real dentro del contexto con `COPY . …` y sin .dockerignore que lo excluya acaba en la imagen.
+      if (!d.copiesContext) continue;
+      const lines = s === null ? [] : s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      const leaked = (fs.existsSync(ctxAbs) ? walk(ctxAbs) : [])
+        .map((f) => path.relative(ctxAbs, path.join(root, f)).split(path.sep).join('/'))
+        .filter((f) => isEnvFile(f) && !excludedByDockerignore(lines, f));
+      if (leaked.length) {
+        fail('dockerignore-env-in-context', d.file, `el Dockerfile hace \`COPY . …\` y el contexto${ctxRel ? ` \`${ctxRel}\`` : ''} contiene ${leaked.join(', ')}${s === null ? ' sin .dockerignore' : ' que su .dockerignore no excluye'}: el secreto entraría en la imagen`);
+      }
+    }
+  }
+}
+
+function checkDockerignore(where, s) {
   const lines = s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const has = (...alts) => alts.some((a) => lines.includes(a));
   if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env', '**/*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
@@ -175,6 +320,29 @@ function checkDockerignore() {
   if (!has('node_modules', '**/node_modules', 'node_modules/', '**/node_modules/')) fail('dockerignore-node-modules', where, 'falta `**/node_modules` (binarios del host y paquetes de desarrollo)');
   for (const l of lines) {
     if (/^!.*\.env/.test(l) && isEnvFile(l.slice(1))) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// 2b) Servidores Python detrás de un proxy: IP real del cliente sin falsificación.
+// ---------------------------------------------------------------------------------------------------------------
+function checkProxy(dockerUnits) {
+  const units = dockerUnits.map((d) => ({ where: d.file, text: d.code, start: d.code.split('\n').filter((l) => /^\s*(?:CMD|ENTRYPOINT)\b/i.test(l)).join('\n') }));
+  for (const c of composeFiles()) {
+    const text = stripHashComments(read(path.join(root, c)) || '');
+    units.push({ where: c, text, start: text });
+  }
+  for (const u of units) {
+    if (FORWARDED_ALL.test(u.text)) {
+      warn('forwarded-ips-wildcard', u.where, 'uvicorn/gunicorn confían en X-Forwarded-For de cualquier origen (`--forwarded-allow-ips=*` / FORWARDED_ALLOW_IPS=*): cualquiera puede falsificar su IP y saltarse los frenos por IP. Limítalo a la IP o la red del proxy');
+    }
+  }
+  const hasProxy = projectFiles().files.some((f) => /^(?:Caddyfile(?:\..+)?|nginx\.conf)$/.test(f.split('/').pop()));
+  if (!hasProxy || units.some((u) => PROXY_FLAGS.test(u.text))) return;
+  for (const u of units) {
+    if (/\buvicorn\b/.test(u.start)) {
+      warn('uvicorn-proxy-headers', u.where, 'uvicorn sin `--proxy-headers` (ni `--forwarded-allow-ips`) y el proyecto tiene un proxy inverso (Caddyfile/nginx.conf): los frenos por IP verán solo la IP del proxy');
+    }
   }
 }
 
@@ -223,10 +391,43 @@ function isFrontend(f) {
   return (config.frontendExtensions || []).some((ext) => f.endsWith(ext));
 }
 
+// Ficheros del proyecto: los versionados (si root es la raíz del repositorio) o un recorrido de la carpeta.
+let fileListCache = null;
+function projectFiles() {
+  if (!fileListCache) {
+    const tracked = gitFiles();
+    const inRepoRoot = tracked !== null && fs.existsSync(path.join(root, '.git'));
+    fileListCache = { tracked, inRepoRoot, files: inRepoRoot ? tracked : walk(root) };
+  }
+  return fileListCache;
+}
+
+// Avisos sobre el contenido de un fichero de código (no de pruebas ni de documentación).
+function checkCodeFile(f, s) {
+  if (/\.(?:py|[cm]?[jt]s)$/.test(f) && !isFrontend(f)) {
+    const lines = s.split('\n');
+    const norm = (v) => v.replace(/[-_]/g, '').toLowerCase();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.includes('secret-scan: ignore') || /^\s*(?:#|\/\/|\*)/.test(line)) continue;
+      const name = SECRET_NAME_IN_CODE.exec(line);
+      if (!name) continue;
+      const known = [...line.matchAll(/(["'`])([^"'`\n]*)\1/g)].some((q) => q.index > name.index && norm(q[2]) !== norm(name[0]) && KNOWN_DEFAULT_SECRET.test(q[2]));
+      if (known) {
+        warn('default-secret-value', f, `línea ${i + 1}: el secreto tiene un valor por defecto conocido (changeme, secret, dev-secret…). Si falta la variable de entorno, el servidor debe negarse a arrancar. Para silenciar un valor falso a propósito: \`secret-scan: ignore\``);
+        break;
+      }
+    }
+  }
+  if (BROWSER_NO_SANDBOX_API.test(s)) warn('browser-sandbox-disabled', f, 'Playwright/Chromium con el sandbox desactivado (chromium_sandbox=False / chromiumSandbox: false): un exploit del renderizador comprometería el proceso y sus secretos. Déjalo activo y aísla el navegador si no puede');
+  if (/\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/.test(f) && TOKEN_IN_BROWSER_STORAGE.test(s)) {
+    warn('frontend-token-storage', f, 'guarda un token o sesión en localStorage/sessionStorage: cualquier XSS se lleva la sesión. Usa una cookie httpOnly (con Secure y SameSite) puesta por el servidor');
+  }
+}
+
 function checkFiles(extra) {
-  const tracked = gitFiles();
-  const inRepoRoot = tracked !== null && fs.existsSync(path.join(root, '.git'));
-  const files = new Set([...(inRepoRoot ? tracked : walk(root)), ...extra]);
+  const { tracked, inRepoRoot, files: listed } = projectFiles();
+  const files = new Set([...listed, ...extra]);
   for (const f of files) {
     if (isEnvFile(f)) {
       if (inRepoRoot && tracked.includes(f)) fail('env-tracked', f, 'fichero .env versionado: los secretos nunca van al repositorio (sácalo, añádelo a .gitignore y rota sus claves)');
@@ -235,9 +436,11 @@ function checkFiles(extra) {
     if (!TEXT_EXT.test(f) || /(^|\/)node_modules\/|(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(f)) continue;
     const s = read(path.join(root, f));
     if (s === null || s.length > 2_000_000) continue;
-    if (!startsWithAny(f, config.allowMention) && !(config.allowMention || []).includes(f)) {
+    const allowed = startsWithAny(f, config.allowMention) || (config.allowMention || []).includes(f);
+    if (!allowed) {
       const m = PUBLIC_SECRET_VAR.exec(s);
       if (m) fail('public-secret-var', f, `\`${m[0]}\`: las variables con prefijo público se incrustan en el navegador. Usa un nombre sin prefijo, leído solo en el servidor`);
+      if (!isTestFile(f)) checkCodeFile(f, s);
     }
     if (isFrontend(f)) {
       if (AI_SDK.test(s)) fail('frontend-ai-sdk', f, 'SDK de IA en el frontend: la clave acabaría en el navegador. Las llamadas a IA van por el servidor');
@@ -256,7 +459,7 @@ const changedRel = changedArg ? rel(path.resolve(changedArg)) : null;
 if (changedRel !== null && (!changedRel || changedRel.startsWith('..') || path.isAbsolute(changedRel))) process.exit(0);
 const changedGroup = (() => {
   if (changedRel === null) return null;
-  if ((config.dockerfiles || []).includes(changedRel) || changedRel === config.dockerignore) return 'docker';
+  if ((config.dockerfiles || []).includes(changedRel) || changedRel === config.dockerignore || /(^|\/)[^/]*\.dockerignore$/.test(changedRel)) return 'docker';
   if ((config.viteConfigs || []).includes(changedRel)) return 'vite';
   if (config.serverEntry && changedRel === config.serverEntry) return 'server';
   return null;
@@ -268,9 +471,13 @@ const extra = [...argv, ...(changedArg ? [changedArg] : [])]
   .map((p) => rel(path.resolve(p)))
   .filter((p) => p && !p.startsWith('..') && !path.isAbsolute(p));
 
-let anyDockerfile = false;
-for (const f of config.dockerfiles || []) anyDockerfile = checkDockerfile(f) || anyDockerfile;
-if (anyDockerfile) checkDockerignore();
+const dockerUnits = [];
+for (const f of config.dockerfiles || []) {
+  const r = checkDockerfile(f);
+  if (r) dockerUnits.push({ file: f, ...r });
+}
+if (dockerUnits.length) checkDockerContexts(dockerUnits);
+checkProxy(dockerUnits);
 checkViteConfig();
 checkServerEntry();
 checkFiles(extra);

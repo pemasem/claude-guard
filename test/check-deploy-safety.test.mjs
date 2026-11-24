@@ -295,3 +295,220 @@ test('navegador headless sin sandbox: aviso, y error si el contenedor corre como
   put(root, 'Dockerfile', dockerfile());
   assert.doesNotMatch(check().out, /docker-browser-no-sandbox/);
 });
+
+// --- Monorepos y backend Python (falsos positivos y reglas nuevas) ---------------------------------------------
+
+const PY_DOCKERFILE = 'FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt .\nRUN pip install -r requirements.txt && useradd -r app\nCOPY app ./app\nUSER app\nCMD ["uvicorn", "app.main:app", "--host", "0.0.0.0"]\n';
+const NEXT_STANDALONE = [
+  'FROM node:22-alpine AS deps',
+  'WORKDIR /app',
+  'COPY package.json package-lock.json ./',
+  'RUN npm ci',
+  '',
+  'FROM node:22-alpine AS build',
+  'WORKDIR /app',
+  'COPY --from=deps /app/node_modules ./node_modules',
+  'COPY . .',
+  'RUN npm run build',
+  '',
+  'FROM node:22-alpine AS runner',
+  'ENV NODE_ENV=production',
+  'WORKDIR /app',
+  'COPY --from=build /app/.next/standalone ./',
+  'COPY --from=build /app/.next/static ./.next/static',
+  'USER node',
+  'CMD ["node", "server.js"]',
+  '',
+].join('\n');
+const GOOD_IGNORE = '**/.env\n**/.env.*\n.git\n**/node_modules\n';
+const monorepo = () => {
+  fs.rmSync(path.join(root, 'Dockerfile'));
+  fs.rmSync(path.join(root, '.dockerignore'));
+  put(root, 'claude-guard.config.json', JSON.stringify({ dockerfiles: ['backend/Dockerfile', 'web/Dockerfile'] }));
+  put(root, 'backend/Dockerfile', PY_DOCKERFILE);
+  put(root, 'web/Dockerfile', NEXT_STANDALONE);
+};
+
+test('monorepo: cada Dockerfile exige el .dockerignore de su carpeta (el de la raíz no vale)', () => {
+  monorepo();
+  put(root, '.dockerignore', GOOD_IGNORE); // el de la raíz no cubre los contextos backend/ y web/
+  const r = check();
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[dockerignore-missing\] backend\/\.dockerignore/);
+  assert.match(r.out, /\[dockerignore-missing\] web\/\.dockerignore/);
+  put(root, 'backend/.dockerignore', GOOD_IGNORE);
+  put(root, 'web/.dockerignore', GOOD_IGNORE);
+  const ok = check();
+  assert.equal(ok.status, 0, ok.out);
+});
+
+test('monorepo: .env real en el contexto + COPY . . sin .dockerignore que lo excluya es error', () => {
+  monorepo();
+  put(root, 'backend/.dockerignore', GOOD_IGNORE);
+  put(root, 'web/.env.local', 'NEXT_TELEMETRY_DISABLED=1\n');
+  const r = check();
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[dockerignore-env-in-context\] web\/Dockerfile[^\n]*web[^\n]*\.env\.local/);
+  assert.doesNotMatch(r.out, /backend\/\.dockerignore/);
+  // Con un .dockerignore que lo excluye, pasa.
+  put(root, 'web/.dockerignore', GOOD_IGNORE);
+  assert.equal(check().status, 0);
+  // Sin COPY . . no hay riesgo de que el .env entre por ahí.
+  fs.rmSync(path.join(root, 'web/.dockerignore'));
+  put(root, 'web/Dockerfile', NEXT_STANDALONE.replace('COPY . .', 'COPY src ./src'));
+  assert.doesNotMatch(check().out, /dockerignore-env-in-context/);
+  // Una plantilla (.env.example) no cuenta como .env real.
+  fs.rmSync(path.join(root, 'web/.env.local'));
+  put(root, 'web/Dockerfile', NEXT_STANDALONE);
+  put(root, 'web/.env.example', 'FOO=\n');
+  assert.doesNotMatch(check().out, /dockerignore-env-in-context/);
+});
+
+test('el .dockerignore de un contexto de docker-compose se busca en su context:', () => {
+  fs.rmSync(path.join(root, '.dockerignore'));
+  put(root, 'claude-guard.config.json', JSON.stringify({ dockerfiles: ['Dockerfile', 'backend/Dockerfile'] }));
+  put(root, 'backend/Dockerfile', PY_DOCKERFILE);
+  put(root, 'docker-compose.yml', 'services:\n  api:\n    build:\n      context: .\n      dockerfile: backend/Dockerfile\n  web:\n    build: .\n');
+  // Ambos se construyen desde la raíz: basta el .dockerignore de la raíz.
+  put(root, '.dockerignore', GOOD_IGNORE);
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  // Un servicio con otro context: exige el .dockerignore de ese context.
+  put(root, 'docker-compose.yml', 'services:\n  api:\n    build:\n      context: ./backend\n');
+  const r2 = check();
+  assert.equal(r2.status, 1);
+  assert.match(r2.out, /\[dockerignore-missing\] backend\/\.dockerignore/);
+  put(root, 'backend/.dockerignore', GOOD_IGNORE);
+  assert.equal(check().status, 0);
+});
+
+test('la opción dockerignore sigue valiendo para el contexto de la raíz', () => {
+  fs.rmSync(path.join(root, '.dockerignore'));
+  put(root, 'docker/ignore.txt', GOOD_IGNORE);
+  put(root, 'claude-guard.config.json', JSON.stringify({ dockerignore: 'docker/ignore.txt' }));
+  assert.equal(check().status, 0);
+  fs.rmSync(path.join(root, 'docker/ignore.txt'));
+  assert.match(check().out, /\[dockerignore-missing\] docker\/ignore\.txt/);
+});
+
+test('docker-prod-deps: Next standalone multi-etapa (la final solo copia artefactos) no es error', () => {
+  put(root, 'Dockerfile', NEXT_STANDALONE);
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, /docker-prod-deps/);
+});
+
+test('docker-prod-deps: sigue siendo error si la etapa final instala sin --omit=dev o hereda una etapa con devDependencies', () => {
+  put(root, 'Dockerfile', NEXT_STANDALONE.replace('COPY --from=build /app/.next/standalone ./', 'COPY package.json package-lock.json ./\nRUN npm ci\nCOPY --from=build /app/.next/standalone ./'));
+  assert.match(check().out, /\[docker-prod-deps\]/);
+  put(root, 'Dockerfile', NEXT_STANDALONE.replace('FROM node:22-alpine AS build', 'FROM deps AS build').replace('FROM node:22-alpine AS runner', 'FROM build AS runner'));
+  assert.match(check().out, /\[docker-prod-deps\]/);
+  // Instalar solo producción en la etapa final, o podar, vale.
+  put(root, 'Dockerfile', NEXT_STANDALONE.replace('COPY --from=build /app/.next/standalone ./', 'COPY package.json package-lock.json ./\nRUN npm ci --omit=dev\nCOPY --from=build /app/.next/standalone ./'));
+  assert.doesNotMatch(check().out, /docker-prod-deps/);
+  // Un `npm ci --omit=dev` en una etapa intermedia no salva a una final que instala sin filtrar.
+  put(root, 'Dockerfile', dockerfile().replace('RUN npm ci --omit=dev', 'RUN npm install').replace('RUN npm ci\n', 'RUN npm ci --omit=dev\n'));
+  assert.match(check().out, /\[docker-prod-deps\]/);
+});
+
+test('public-secret-var: claves públicas por diseño (PUBLISHABLE, ANON) no se marcan; ANONYMIZE_KEY sí', () => {
+  const p = (a, b) => [a, b].join('');
+  const names = [`${p('VI', 'TE_')}SUPABASE_PUBLISHABLE_KEY`, `${p('NEXT', '_PUBLIC_')}SUPABASE_ANON_KEY`, `${p('NEXT', '_PUBLIC_')}STRIPE_PUBLISHABLE_KEY`];
+  put(root, '.env.example', names.map((n) => `${n}=\n`).join(''));
+  put(root, 'src/components/Supa.tsx', names.map((n, i) => `export const a${i} = process.env.${n};`).join('\n') + '\n');
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  put(root, '.env.example', `${p('VI', 'TE_')}ANONYMIZE_KEY=\n`);
+  assert.match(check().out, /\[public-secret-var\]/);
+  put(root, '.env.example', `${FAKE.nextPublicSecretVar}=\n`);
+  assert.match(check().out, /\[public-secret-var\]/);
+});
+
+test('forwarded-ips-wildcard: aviso por --forwarded-allow-ips=* o FORWARDED_ALLOW_IPS=*, también en compose', () => {
+  const py = (cmd) => PY_DOCKERFILE.replace(/CMD .*\n/, cmd + '\n');
+  for (const cmd of ['CMD ["uvicorn", "app.main:app", "--proxy-headers", "--forwarded-allow-ips=*"]', "CMD uvicorn app.main:app --proxy-headers --forwarded-allow-ips='*'", 'CMD ["gunicorn", "app:app", "--forwarded-allow-ips", "*"]', 'ENV FORWARDED_ALLOW_IPS=*\nCMD ["uvicorn", "app.main:app"]']) {
+    put(root, 'Dockerfile', py(cmd));
+    const r = check();
+    assert.equal(r.status, 0, r.out); // solo aviso
+    assert.match(r.out, /\[forwarded-ips-wildcard\] Dockerfile/, cmd);
+  }
+  put(root, 'Dockerfile', py('CMD ["uvicorn", "app.main:app", "--proxy-headers", "--forwarded-allow-ips=172.18.0.2"]'));
+  assert.doesNotMatch(check().out, /forwarded-ips-wildcard/);
+  put(root, 'docker-compose.yml', 'services:\n  api:\n    environment:\n      - FORWARDED_ALLOW_IPS=*\n');
+  assert.match(check().out, /\[forwarded-ips-wildcard\] docker-compose\.yml/);
+  put(root, 'docker-compose.yml', 'services:\n  api:\n    command: ["uvicorn", "app.main:app", "--forwarded-allow-ips", "*"]\n');
+  assert.match(check().out, /\[forwarded-ips-wildcard\] docker-compose\.yml/);
+});
+
+test('uvicorn-proxy-headers: aviso solo con un proxy en el proyecto y sin --proxy-headers ni --forwarded-allow-ips', () => {
+  put(root, 'Dockerfile', PY_DOCKERFILE);
+  // Sin Caddyfile ni nginx.conf, no hay proxy conocido.
+  assert.doesNotMatch(check().out, /uvicorn-proxy-headers/);
+  put(root, 'Caddyfile', 'example.com {\n  reverse_proxy api:8000\n}\n');
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /\[uvicorn-proxy-headers\] Dockerfile[^\n]*IP del proxy/);
+  put(root, 'Dockerfile', PY_DOCKERFILE.replace('"--host", "0.0.0.0"', '"--host", "0.0.0.0", "--proxy-headers", "--forwarded-allow-ips=10.0.0.5"'));
+  assert.doesNotMatch(check().out, /uvicorn-proxy-headers/);
+  // El flag puede estar en el compose que lanza la imagen.
+  put(root, 'Dockerfile', PY_DOCKERFILE);
+  put(root, 'docker-compose.yml', 'services:\n  api:\n    command: uvicorn app.main:app --proxy-headers\n');
+  assert.doesNotMatch(check().out, /uvicorn-proxy-headers/);
+  fs.rmSync(path.join(root, 'docker-compose.yml'));
+  fs.rmSync(path.join(root, 'Caddyfile'));
+  put(root, 'infra/nginx.conf', 'events {}\n');
+  assert.match(check().out, /\[uvicorn-proxy-headers\]/);
+});
+
+test('default-secret-value: secreto con valor por defecto conocido en código de servidor', () => {
+  put(root, 'backend/app/config.py', 'import os\nsecret_key: str = "changeme"\n');
+  const r = check();
+  assert.equal(r.status, 0, r.out); // aviso, no error
+  assert.match(r.out, /\[default-secret-value\] backend\/app\/config\.py: línea 2/);
+  for (const [file, body] of [
+    ['backend/app/a.py', 'import os\nSECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret")\n'],
+    ['server/b.js', 'const jwtSecret = process.env.JWT_SECRET || "cambiame";\n'],
+    ['api/c.ts', "export const sessionSecret = process.env.SESSION_SECRET ?? 'secret';\n"],
+  ]) {
+    put(root, file, body);
+    assert.match(check().out, new RegExp(`\\[default-secret-value\\] ${file.replace('.', '\\.')}`), file);
+  }
+  // Sin valor por defecto, con valor aleatorio, comentario, silenciado, tests y documentación: nada.
+  for (const f of ['backend/app/config.py', 'backend/app/a.py', 'server/b.js', 'api/c.ts']) fs.rmSync(path.join(root, f));
+  put(root, 'backend/app/ok1.py', 'import os\nSECRET_KEY = os.environ["SECRET_KEY"]\nJWT_SECRET = os.getenv("JWT_SECRET")\n');
+  put(root, 'backend/app/ok2.py', 'secret_key = "q8Zr2vXk7LmP4sTn"\n# secret_key = "changeme"\n');
+  put(root, 'backend/app/ok3.py', 'secret_key = "changeme"  # secret-scan: ignore\n');
+  put(root, 'backend/tests/test_auth.py', 'secret_key = "changeme"\n');
+  put(root, 'docs/auth.md', 'secret_key = "changeme"\n');
+  assert.doesNotMatch(check().out, /default-secret-value/);
+});
+
+test('browser-sandbox-disabled: aviso por chromium_sandbox=False / chromiumSandbox: false', () => {
+  put(root, 'server/scrape.py', 'browser = p.chromium.launch(chromium_sandbox=False)\n');
+  put(root, 'server/scrape.js', 'const b = await chromium.launch({ chromiumSandbox: false });\n');
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /\[browser-sandbox-disabled\] server\/scrape\.py/);
+  assert.match(r.out, /\[browser-sandbox-disabled\] server\/scrape\.js/);
+  put(root, 'server/scrape.py', 'browser = p.chromium.launch(chromium_sandbox=True)\n');
+  put(root, 'server/scrape.js', 'const b = await chromium.launch({ chromiumSandbox: true });\n');
+  assert.doesNotMatch(check().out, /browser-sandbox-disabled/);
+});
+
+test('frontend-token-storage: token o sesión en localStorage/sessionStorage', () => {
+  const bad = [
+    "localStorage.setItem('access_token', t);",
+    'sessionStorage.setItem("jwt", t);',
+    'window.localStorage.setItem(`auth-${id}`, t);',
+    'localStorage.setItem(TOKEN_KEY, t);',
+    "localStorage['session'] = s;",
+  ];
+  for (const line of bad) {
+    put(root, 'src/components/Login.tsx', `export const save = (t: string) => { ${line} };\n`);
+    const r = check();
+    assert.equal(r.status, 0, r.out); // aviso
+    assert.match(r.out, /\[frontend-token-storage\] src\/components\/Login\.tsx/, line);
+  }
+  put(root, 'src/components/Login.tsx', "export const save = () => { localStorage.setItem('theme', 'dark'); const t = localStorage.getItem('access_token'); };\n");
+  assert.doesNotMatch(check().out, /frontend-token-storage/);
+});
