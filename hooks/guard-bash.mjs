@@ -1,6 +1,6 @@
 // claude-guard · PreToolUse (Bash | PowerShell): frena los comandos que pueden romper lo que funciona,
 // perder trabajo o exponer secretos. Exit 2 = bloqueado (el motivo le llega a Claude).
-import { block, currentBranch, isEnvFile, loadConfig, projectDir, readInput, PUBLIC_PREFIXES, SECRET_WORDS } from './lib.mjs';
+import { block, currentBranch, isEnvFile, loadConfig, projectDir, readInput, PUBLIC_BY_DESIGN, PUBLIC_PREFIXES, SECRET_WORDS } from './lib.mjs';
 
 const input = readInput();
 const cmd = String(input.tool_input?.command ?? '');
@@ -10,14 +10,14 @@ const protectedBranches = (config.protectedBranches || []).filter(Boolean);
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const branchAlt = protectedBranches.map(esc).join('|');
 
-const publicSecretAssign = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})\\w*(?:${SECRET_WORDS})\\w*\\s*=`, 'i');
+const publicSecretAssign = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})(?!${PUBLIC_BY_DESIGN})\\w*(?:${SECRET_WORDS})\\w*\\s*=`, 'i');
 
 const rules = [
   [/git\s+push\b[^\n]*(--force\b|\s-f\b|--force-with-lease|\s\+[^\s+])/, 'Push forzado prohibido (--force, -f o refspec con "+"): reescribe historia compartida. Abre un PR o crea una rama nueva.'],
   ...(branchAlt
     ? [[new RegExp(`git\\s+push\\b[^\\n]*\\s(?:\\S+\\s+)?(?:[^\\s:]*:)?(?:refs/heads/)?(?:${branchAlt})(?:\\s|$)`), `Push directo a una rama protegida (${protectedBranches.join(', ')}). El flujo es rama de trabajo → pull request.`]]
     : []),
-  [/git\s+reset\s+--hard/, 'git reset --hard descarta trabajo sin posibilidad de recuperarlo. Usa git stash o una rama.'],
+  [/git\s+reset\s+--hard/, 'git reset --hard descarta trabajo sin posibilidad de recuperarlo. Crea una rama o un commit de trabajo antes (git stash es peligroso con varios agentes en paralelo: el índice se comparte).'],
   [/git\s+clean\s+-[a-z]*f/, 'git clean -f borra ficheros sin seguimiento de forma irreversible.'],
   [/--no-verify\b|--no-gpg-sign\b/, 'No se saltan hooks ni firmas. Si un hook falla, arregla la causa.'],
   [/\brm\s+-[a-z]*r[a-z]*f?\s+(\/|~|\.|\*|\.git|src\/?)(\s|$)/, 'Borrado recursivo de una ruta raíz bloqueado.'],
@@ -35,13 +35,107 @@ const rules = [
 ];
 
 // Lectores de ficheros (bash, cmd y PowerShell) sobre un fichero .env, .env_prod, .env-staging, prod.env…
-const READERS = /\b(cat|type|Get-Content|gc|less|more|head|tail|grep|rg|sed|awk|bat|nl|strings|xxd|od|Select-String|sls|findstr)\b/i;
-function readsEnvFile(command) {
-  for (const seg of command.split(/[|;&\n]/)) {
-    const m = READERS.exec(seg);
-    if (!m) continue;
-    for (const tok of seg.slice(m.index + m[0].length).split(/[\s"'`=,()]+/)) {
-      if (tok && isEnvFile(tok, config.envTemplates)) return true;
+const READERS = new Set(['cat', 'type', 'get-content', 'gc', 'less', 'more', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'bat', 'nl', 'strings', 'xxd', 'od', 'select-string', 'sls', 'findstr']);
+// grep/rg/sls/findstr: el primer argumento sin opción es el patrón de búsqueda, no un fichero.
+const PATTERN_READERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'findstr']);
+// Opciones con valor que no son el patrón ni un fichero (para no confundirlas con el primer argumento posicional).
+const VALUED_SHORT = { grep: 'ABCmdD', egrep: 'ABCmdD', fgrep: 'ABCmdD', rg: 'ABCmgtTMjdrE' };
+const VALUED_LONG = /^--(?:max-count|context|after-context|before-context|include|exclude|exclude-dir|glob|type|type-not|max-filesize|threads|replace|color|colour|directories|devices)$/;
+const VALUED_PS = new Set(['path', 'literalpath', 'context', 'encoding', 'include', 'exclude']);
+
+// Trocea el comando respetando comillas; | ; & saltos de línea, paréntesis y comillas invertidas separan comandos.
+function segments(command) {
+  const segs = [[]];
+  let tok = null;
+  let q = null;
+  const push = () => {
+    if (tok !== null) segs[segs.length - 1].push(tok);
+    tok = null;
+  };
+  const cut = () => {
+    push();
+    if (segs[segs.length - 1].length) segs.push([]);
+  };
+  for (const ch of command) {
+    if (q) {
+      if (ch === q) q = null;
+      else tok += ch;
+    } else if (ch === '"' || ch === "'") {
+      q = ch;
+      tok ??= '';
+    } else if (ch === '\n' || '|;&()`'.includes(ch)) cut();
+    else if (/\s/.test(ch)) push();
+    else tok = (tok ?? '') + ch;
+  }
+  push();
+  return segs.filter((x) => x.length);
+}
+
+const baseName = (t) => t.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
+
+// Índices (de `rest`) del patrón de búsqueda y de los valores de -e/--regexp/-Pattern//c:, que no son ficheros.
+function patternSlots(name, rest) {
+  const skip = new Set();
+  const positional = [];
+  let explicit = false;
+  const ps = name === 'sls' || name === 'select-string';
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (name === 'findstr') {
+      if (/^\/c:/i.test(t)) {
+        explicit = true;
+        skip.add(i);
+      } else if (/^\/g:/i.test(t)) explicit = true;
+      else if (!/^\/[a-z](:|$)/i.test(t)) positional.push(i);
+    } else if (ps) {
+      const m = /^-([a-z]+)(:.*)?$/i.exec(t);
+      if (m && m[1].toLowerCase() === 'pattern') {
+        explicit = true;
+        if (m[2]) skip.add(i);
+        else if (i + 1 < rest.length) skip.add(++i);
+      } else if (m) {
+        if (!m[2] && VALUED_PS.has(m[1].toLowerCase())) i++;
+      } else positional.push(i);
+    } else if (t === '--') {
+      for (let j = i + 1; j < rest.length; j++) positional.push(j);
+      break;
+    } else if (t.startsWith('--')) {
+      if (/^--regexp(=|$)/.test(t)) {
+        explicit = true;
+        if (t.includes('=')) skip.add(i);
+        else if (i + 1 < rest.length) skip.add(++i);
+      } else if (/^--file(=|$)/.test(t)) explicit = true;
+      else if (!t.includes('=') && VALUED_LONG.test(t)) i++;
+    } else if (/^-[^-]/.test(t)) {
+      for (let c = 1; c < t.length; c++) {
+        const ch = t[c];
+        const valued = ch === 'e' || ch === 'f' || (VALUED_SHORT[name] || '').includes(ch);
+        if (!valued) continue;
+        if (ch === 'e' || ch === 'f') explicit = true;
+        const inline = c + 1 < t.length;
+        if (ch === 'e') {
+          if (inline) skip.add(i);
+          else if (i + 1 < rest.length) skip.add(++i);
+        } else if (!inline) i++;
+        break;
+      }
+    } else positional.push(i);
+  }
+  if (!explicit && positional.length) skip.add(positional[0]);
+  return skip;
+}
+
+function readsEnvFile(command, depth = 0) {
+  for (const seg of segments(command)) {
+    const idx = seg.findIndex((t) => READERS.has(baseName(t)));
+    const name = idx >= 0 ? baseName(seg[idx]) : '';
+    const skip = PATTERN_READERS.has(name) ? patternSlots(name, seg.slice(idx + 1)) : new Set();
+    for (let i = 0; i < seg.length; i++) {
+      const t = seg[i];
+      if (idx >= 0 && i > idx && skip.has(i - idx - 1)) continue;
+      // Un argumento entre comillas con varias palabras puede ser otro comando (bash -c "<comando>").
+      if (/[\s|;&]/.test(t) && depth < 3 && readsEnvFile(t, depth + 1)) return true;
+      if (idx >= 0 && i > idx && t.split(/[=,<>]+/).some((x) => x && isEnvFile(x, config.envTemplates))) return true;
     }
   }
   return false;

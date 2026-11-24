@@ -82,3 +82,9 @@ export const PUBLIC_PREFIXES = [
 ].map((p) => p.join(''));
 
 export const SECRET_WORDS = 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|PRIVATE|AUTH';
+
+/**
+ * Nombres que, aun con prefijo público, son claves públicas por diseño (Supabase anon, Stripe publishable…).
+ * Fragmento de expresión regular para un lookahead negativo; el comprobador lleva su propia copia (es autónomo).
+ */
+export const PUBLIC_BY_DESIGN = '\\w*?(?:PUBLISHABLE|(?<![A-Za-z0-9])ANON(?![A-Za-z0-9]))';

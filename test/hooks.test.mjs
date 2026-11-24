@@ -122,6 +122,64 @@ test('envTemplates: plantillas propias versionadas (.env.master) legibles', () =
   assert.equal(file('Read', '/p/src/.env_prod', dir).status, 2);
 });
 
+test('readsEnvFile: el patrón de grep/rg/sls/findstr no se toma por fichero (regresión de un monorepo real)', () => {
+  const dir = tmpDir();
+  const ok = [
+    'grep -iE "^\\.env|dockerignore" .gitignore',
+    'grep -iE "^\\.env|dockerignore" backend/.dockerignore',
+    'git ls-files | grep -iE "^\\.env|docker"',
+    'rg -n "^\\.env" src',
+    'rg --regexp=".env.local" src',
+    'grep -e .env.local -e foo README.md',
+    'grep --regexp .env_prod README.md',
+    'grep -rn --include=*.ts -m 3 foo .',
+    'Select-String -Pattern "^\\.env" -Path notes.txt',
+    'sls .env.local notes.txt',
+    'findstr /i /c:".env.local" notes.txt',
+    'findstr ".env_prod" notes.txt',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+  const blocked = [
+    'grep X .env',
+    'grep -iE "^key" .env.local',
+    'grep -e KEY -e TOKEN .env_prod',
+    'grep -n -- KEY .env',
+    'rg KEY .env',
+    'rg -n -g "*.ts" KEY .env.local',
+    'cat .env',
+    'git ls-files | grep -iE "^\\.env" ; cat .env',
+    'Select-String -Pattern X -Path .env_prod',
+    'sls X .env.local',
+    'findstr /i KEY .env',
+    'findstr /c:"a b" .env_dev',
+    'bash -c "cat .env"',
+    'sh -c \'grep KEY .env\'',
+    'sudo cat /app/.env',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+});
+
+test('guard-bash: git reset --hard no recomienda git stash (índice compartido con varios agentes)', () => {
+  const r = bash('git reset --hard HEAD~1', tmpDir());
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /rama o un commit de trabajo/);
+  assert.doesNotMatch(r.stderr.split('Comando:')[0], /Usa git stash/);
+});
+
+test('guard-bash: claves públicas por diseño (PUBLISHABLE, ANON) no son secretos', () => {
+  const dir = tmpDir();
+  const p = (a, b) => [a, b].join('');
+  const fine = [
+    `export ${p('VI', 'TE_')}SUPABASE_PUBLISHABLE_KEY=abc`,
+    `export ${p('NEXT', '_PUBLIC_')}SUPABASE_ANON_KEY=abc`,
+    `export ${p('NEXT', '_PUBLIC_')}STRIPE_PUBLISHABLE_KEY=abc`,
+  ];
+  for (const c of fine) assert.equal(bash(c, dir).status, 0, c);
+  // ANON solo cuenta como palabra entera: ANONYMIZE_KEY sigue siendo un secreto.
+  assert.equal(bash(`export ${p('VI', 'TE_')}ANONYMIZE_KEY=abc`, dir).status, 2);
+  assert.equal(bash(`export ${FAKE.nextPublicSecretVar}=abc`, dir).status, 2);
+});
+
 test('post-edit: ignora ficheros fuera del proyecto y problemas previos ajenos al fichero editado', () => {
   const dir = goodProject(tmpDir());
   run(path.join(PKG, 'install.mjs'), [dir]);
