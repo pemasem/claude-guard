@@ -20,6 +20,18 @@ test('guard-bash bloquea los comandos peligrosos', () => {
     'rm -rf /',
     'npm audit fix --force',
     'psql -c "DROP TABLE users"',
+    'alembic downgrade base',
+    'poetry run alembic -c alembic.ini downgrade base',
+    'flask db downgrade base',
+    'python manage.py migrate shop zero',
+    'python manage.py flush --no-input',
+    'npx prisma migrate reset --force',
+    'npx prisma db push --force-reset',
+    'bin/rails db:drop',
+    'npx sequelize-cli db:migrate:undo:all',
+    'npx knex migrate:rollback --all',
+    'npx typeorm schema:drop -d ds.ts',
+    'php artisan migrate:fresh --seed',
     'cat .env',
     'type src\\.env.local',
     'printenv',
@@ -36,7 +48,7 @@ test('guard-bash bloquea los comandos peligrosos', () => {
 
 test('guard-bash deja pasar lo normal', () => {
   const dir = tmpDir();
-  for (const c of ['git status', 'git push origin feature/T12-login', 'npm test', 'cat .env.example', 'docker build -t app .', 'npm run build', 'echo VITE_APP_TITLE=Hola']) {
+  for (const c of ['git status', 'git push origin feature/T12-login', 'npm test', 'cat .env.example', 'docker build -t app .', 'npm run build', 'echo VITE_APP_TITLE=Hola', 'alembic upgrade head', 'alembic downgrade -1', 'python manage.py migrate', 'npx prisma migrate deploy', 'npx knex migrate:rollback']) {
     assert.equal(bash(c, dir).status, 0, c);
   }
 });
