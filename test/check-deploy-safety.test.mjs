@@ -148,3 +148,150 @@ test('sin Dockerfile no se exige .dockerignore', () => {
   fs.rmSync(path.join(root, '.dockerignore'));
   assert.equal(check().status, 0);
 });
+
+test('variantes .env versionadas (.env_prod, prod.env) y envTemplates', () => {
+  git(root, 'init', '-q');
+  put(root, 'src/.env_prod', 'X=1\n');
+  put(root, 'prod.env', 'X=1\n');
+  put(root, 'src/.env.master', 'X=\n');
+  put(root, '.env_example', 'X=\n');
+  git(root, 'add', '-A');
+  const r = check();
+  assert.match(r.out, /\[env-tracked\] src\/\.env_prod/);
+  assert.match(r.out, /\[env-tracked\] prod\.env/);
+  assert.match(r.out, /\[env-tracked\] src\/\.env\.master/);
+  assert.doesNotMatch(r.out, /\[env-tracked\] \.env_example/);
+  put(root, 'claude-guard.config.json', JSON.stringify({ envTemplates: ['.env.master'] }));
+  assert.doesNotMatch(check().out, /\.env\.master/);
+});
+
+test('.dockerignore acepta **/.env_* y no se puede re-incluir .env_prod', () => {
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n');
+  assert.equal(check().status, 0);
+  put(root, '.dockerignore', '**/.env\n.git\n**/node_modules\n');
+  assert.match(check().out, /\[dockerignore-env\]/);
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n!.env_prod\n');
+  assert.match(check().out, /no re-incluyas/);
+  put(root, '.dockerignore', '**/.env\n**/.env_*\n.git\n**/node_modules\n!.env_example\n');
+  assert.equal(check().status, 0);
+});
+
+test('--changed: solo los problemas causados por ese fichero', () => {
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', ''));
+  put(root, 'src/components/Bad.tsx', `export const k = '${FAKE.publicSecretVar}';\n`);
+  const scoped = (f) => run(script, ['--root', root, '--changed', path.join(root, f)]);
+  // Fichero ajeno a los problemas: pasa.
+  assert.equal(scoped('server/index.js').status, 0, scoped('server/index.js').out);
+  // El propio Dockerfile o el fichero con la variable pública: falla, y solo por lo suyo.
+  const d = scoped('Dockerfile');
+  assert.equal(d.status, 1);
+  assert.match(d.out, /\[docker-user\]/);
+  assert.doesNotMatch(d.out, /public-secret-var/);
+  const b = scoped('src/components/Bad.tsx');
+  assert.equal(b.status, 1);
+  assert.match(b.out, /public-secret-var/);
+  assert.doesNotMatch(b.out, /docker-user/);
+  // Fuera del proyecto: se ignora.
+  assert.equal(run(script, ['--root', root, '--changed', path.join(tmpDir(), 'x.md')]).status, 0);
+  // Modo completo (CI): ve todo.
+  const full = check();
+  assert.match(full.out, /docker-user/);
+  assert.match(full.out, /public-secret-var/);
+});
+
+test('--changed: editar el .dockerignore reporta los problemas del .dockerignore, no los de Vite', () => {
+  put(root, '.dockerignore', 'node_modules\n');
+  put(root, 'vite.config.ts', "import { defineConfig } from 'vite';\nexport default defineConfig({ envPrefix: '' });\n");
+  const r = run(script, ['--root', root, '--changed', path.join(root, '.dockerignore')]);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /dockerignore-env/);
+  assert.doesNotMatch(r.out, /vite-env-prefix/);
+});
+
+const pyDockerfile = (cmd, extra = '') => `FROM python:3.12-slim\n${extra}WORKDIR /app\nCOPY requirements.txt ./\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY app ./app\nRUN useradd -r app\nUSER app\n${cmd}\n`;
+
+test('Python: una imagen de producción correcta pasa', () => {
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]'));
+  const r = check();
+  assert.equal(r.status, 0, r.out);
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app", "--log-level", "info"]'));
+  assert.equal(check().status, 0);
+});
+
+test('Python: servidores de desarrollo y modo debug en la imagen', () => {
+  const cases = [
+    pyDockerfile('CMD ["uvicorn", "app.main:app", "--reload"]'),
+    pyDockerfile('CMD uvicorn app.main:app --host 0.0.0.0 --reload'),
+    pyDockerfile('CMD ["fastapi", "dev", "app/main.py"]'),
+    pyDockerfile('CMD ["flask", "run", "--host=0.0.0.0"]'),
+    pyDockerfile('CMD ["flask", "--app", "app", "run"]'),
+    pyDockerfile('CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV FLASK_DEBUG=1\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV FLASK_ENV=development\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV DEBUG=True\n'),
+    pyDockerfile('CMD ["gunicorn", "app:app"]', 'ENV DJANGO_DEBUG=true\n'),
+  ];
+  for (const d of cases) {
+    put(root, 'Dockerfile', d);
+    assert.match(check().out, /\[docker-python-dev-server\]/, d);
+  }
+  // No es servidor de desarrollo: DEBUG=False, LOG_DEBUG, y "flask" solo como paquete.
+  for (const extra of ['ENV DEBUG=False\n', 'ENV LOG_DEBUG=1\n']) {
+    put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]', extra));
+    assert.doesNotMatch(check().out, /docker-python-dev-server/, extra);
+  }
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]').replace('pip install --no-cache-dir -r requirements.txt', 'pip install flask run-tools'));
+  assert.doesNotMatch(check().out, /docker-python-dev-server/);
+});
+
+test('Python: --log-level debug/trace es un aviso, no un error', () => {
+  for (const level of ['debug', 'trace']) {
+    put(root, 'Dockerfile', pyDockerfile(`CMD ["uvicorn", "app.main:app", "--log-level", "${level}"]`));
+    const r = check();
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /\[docker-debug-log\]/);
+  }
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--log-level", "info"]'));
+  assert.doesNotMatch(check().out, /docker-debug-log/);
+  put(root, 'claude-guard.config.json', JSON.stringify({ disable: ['docker-debug-log'] }));
+  put(root, 'Dockerfile', pyDockerfile('CMD ["uvicorn", "app.main:app", "--log-level", "debug"]'));
+  assert.doesNotMatch(check().out, /docker-debug-log/);
+});
+
+test('las reglas de Python no se aplican a una imagen de Node', () => {
+  put(root, 'Dockerfile', dockerfile().replace('ENV NODE_ENV=production', 'ENV NODE_ENV=production\nENV DEBUG=True'));
+  assert.doesNotMatch(check().out, /docker-python-dev-server/);
+});
+
+test('docker-user: el mensaje depende de la imagen', () => {
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', ''));
+  assert.match(check().out, /USER node/);
+  put(root, 'Dockerfile', pyDockerfile('CMD ["gunicorn", "app:app"]').replace('RUN useradd -r app\nUSER app\n', ''));
+  const r = check();
+  assert.match(r.out, /\[docker-user\]/);
+  assert.match(r.out, /useradd -r app/);
+  assert.doesNotMatch(r.out, /USER node/);
+});
+
+test('navegador headless sin sandbox: aviso, y error si el contenedor corre como root', () => {
+  // Con usuario sin privilegios: solo aviso.
+  for (const flag of ['--no-sandbox', '--disable-setuid-sandbox']) {
+    put(root, 'Dockerfile', dockerfile().replace('USER node', `ENV CHROMIUM_FLAGS=${flag}\nUSER node`));
+    const r = check();
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /\[docker-browser-no-sandbox\]/, flag);
+  }
+  put(root, 'Dockerfile', dockerfile().replace('CMD ["node", "server/index.js"]', 'CMD ["node", "server/index.js", "--no-sandbox"]'));
+  assert.match(check().out, /\[docker-browser-no-sandbox\]/);
+  // Como root: error.
+  put(root, 'Dockerfile', dockerfile().replace('USER node\n', 'ENV CHROMIUM_FLAGS=--no-sandbox\n'));
+  const r = check();
+  assert.equal(r.status, 1);
+  assert.match(r.out, /\[docker-browser-no-sandbox\][^\n]*root/);
+  // Sin la bandera, ni aviso ni error; un comentario no cuenta.
+  goodProject(root);
+  put(root, 'Dockerfile', dockerfile().replace('USER node', '# no usar --no-sandbox\nUSER node'));
+  assert.doesNotMatch(check().out, /docker-browser-no-sandbox/);
+  put(root, 'Dockerfile', dockerfile());
+  assert.doesNotMatch(check().out, /docker-browser-no-sandbox/);
+});

@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 const argv = process.argv.slice(2);
 const rootIdx = argv.indexOf('--root');
 const rootArg = rootIdx >= 0 ? argv.splice(rootIdx, 2)[1] : null;
+const changedIdx = argv.indexOf('--changed');
+const changedArg = changedIdx >= 0 ? argv.splice(changedIdx, 2)[1] : null;
 const root = path.resolve(rootArg || path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 
 const DEFAULTS = {
@@ -30,6 +32,7 @@ const DEFAULTS = {
   serverDirs: ['server', 'api', 'backend', 'functions', 'src/server', 'src/api', 'app/api', 'src/app/api', 'pages/api', 'src/pages/api', 'scripts'],
   serverEntry: null,
   allowMention: ['docs/', 'test/', 'tests/', '__tests__/', '.claude-guard/', '.claude/hooks/claude-guard/', 'CHANGELOG.md', 'claude-guard.config.json'],
+  envTemplates: [],
   strictImportMetaEnv: false,
   copyAllIsError: false,
   disable: [],
@@ -58,15 +61,23 @@ const SECRET_WORDS = 'KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIAL|PRIVATE|AU
 const PUBLIC_SECRET_VAR = new RegExp(`\\b(?:${PUBLIC_PREFIXES.join('|')})[A-Z0-9_]*(?:${SECRET_WORDS})[A-Z0-9_]*\\b`);
 const AI_SDK = /(?:from\s+|import\s*\(\s*|require\s*\(\s*)['"](@google\/genai|@google\/generative-ai|openai|@anthropic-ai\/sdk|groq-sdk|@mistralai\/[\w-]+|cohere-ai|replicate)['"]/;
 const BROWSER_ENV_OK = new Set(['DEV', 'PROD', 'MODE', 'BASE_URL', 'SSR']);
+// Misma definición que isEnvFile de hooks/lib.mjs (este comprobador es autónomo, también corre en CI).
+function isEnvFile(file) {
+  const f = file.replace(/\\/g, '/');
+  const base = f.split('/').pop();
+  if (!/^(\.env([._-].+)?|.+\.env)$/i.test(base)) return false;
+  if (/[._-](example|sample|template|dist)$/i.test(base)) return false;
+  return !(config.envTemplates || []).some((t) => f === t || f.endsWith('/' + t));
+}
 const TEXT_EXT = /\.(m?[jt]sx?|c[jt]s|json|md|mdx|ya?ml|html|css|scss|sh|ps1|txt|example|sample|sql|toml|ini|cfg|conf|vue|svelte|astro|py|rb|go|java|kt|cs|php|tf|properties)$|(^|\/)(Dockerfile[^/]*|\.dockerignore|\.gitignore|\.env[^/]*|Makefile|Procfile)$/i;
 
 const problems = [];
 const warnings = [];
 function fail(rule, where, msg) {
-  if (!disabled.has(rule)) problems.push(`[${rule}] ${where}: ${msg}`);
+  if (!disabled.has(rule)) problems.push({ rule, where, text: `[${rule}] ${where}: ${msg}` });
 }
 function warn(rule, where, msg) {
-  if (!disabled.has(rule)) warnings.push(`[${rule}] ${where}: ${msg}`);
+  if (!disabled.has(rule)) warnings.push({ rule, where, text: `[${rule}] ${where}: ${msg}` });
 }
 
 function gitFiles() {
@@ -101,6 +112,8 @@ function checkDockerfile(file) {
   // La forma exec de CMD/ENTRYPOINT (["npm", "run", "dev"]) se aplana para que las reglas vean el comando.
   const code = stripHashComments(s).replace(/["']\s*,\s*["']/g, ' ');
   const isNode = /^\s*FROM\s+[^\n]*\bnode\b/im.test(code);
+  // Python: la imagen parte de python o el CMD/ENTRYPOINT arranca un servidor Python.
+  const isPython = /^\s*FROM\s+[^\n]*\bpython\b/im.test(code) || /^\s*(?:CMD|ENTRYPOINT)\b[^\n]*\b(?:uvicorn|gunicorn|hypercorn|daphne|flask|fastapi|manage\.py|python[\d.]*)\b/im.test(code);
 
   if (isNode && !/^\s*ENV\s+(?:[^\n]*\s)?NODE_ENV(?:=|\s+)["']?production["']?(?:\s|$)/m.test(code)) {
     fail('docker-node-env', where, 'falta `ENV NODE_ENV=production`: muchas apps (Express+Vite, Nuxt, etc.) arrancan el modo desarrollo sin él');
@@ -111,8 +124,27 @@ function checkDockerfile(file) {
   }
   const users = [...code.matchAll(/^\s*USER\s+(\S+)/gm)].map((m) => m[1]);
   const fromNonroot = /^\s*FROM\s+[^\n]*:nonroot\b/im.test(code);
-  if (!fromNonroot && (!users.length || /^(root|0)(:|$)/.test(users[users.length - 1]))) {
-    fail('docker-user', where, 'el contenedor corre como root: añade `USER node` (o un usuario sin privilegios) en la etapa final');
+  const runsAsRoot = !fromNonroot && (!users.length || /^(root|0)(:|$)/.test(users[users.length - 1]));
+  if (runsAsRoot) {
+    fail('docker-user', where, isNode
+      ? 'el contenedor corre como root: añade `USER node` (o un usuario sin privilegios) en la etapa final'
+      : 'el contenedor corre como root: añade un usuario sin privilegios (p. ej. `RUN useradd -r app` + `USER app`) en la etapa final');
+  }
+  // Navegador headless sin sandbox: si renderiza páginas de terceros como root y en un contenedor con secretos,
+  // un exploit del renderizador da una shell root con todo el entorno. Aviso; error si además corre como root.
+  if (/--no-sandbox\b|--disable-setuid-sandbox\b/.test(code)) {
+    (runsAsRoot ? fail : warn)('docker-browser-no-sandbox', where, runsAsRoot
+      ? 'navegador headless sin sandbox (--no-sandbox / --disable-setuid-sandbox) y el contenedor corre como root: un exploit del renderizador daría una shell root con todos los secretos del entorno'
+      : 'navegador headless sin sandbox (--no-sandbox / --disable-setuid-sandbox): un exploit del renderizador comprometería el contenedor y sus secretos; si la plataforma lo obliga, aísla el navegador en un servicio sin secretos');
+  }
+  if (isPython) {
+    if (/\buvicorn\b[^\n]*--reload\b|\bfastapi\s+dev\b|\bflask\b(?:\s+--?[\w-]+(?:[= ]\S+)?)*\s+run(?![\w-])|manage\.py\s+runserver\b|\bFLASK_DEBUG(?:=|\s+)["']?(?:1|true)\b|\bFLASK_ENV(?:=|\s+)["']?development\b|\b(?:DJANGO_)?DEBUG(?:=|\s+)["']?(?:True|true|1)\b/i.test(code)) {
+      fail('docker-python-dev-server', where, 'servidor de desarrollo de Python o modo debug en la imagen (uvicorn --reload, fastapi dev, flask run, manage.py runserver, FLASK_DEBUG, DEBUG=True): usa uvicorn/gunicorn sin --reload y con el debug apagado');
+    }
+    const startLines = code.split('\n').filter((l) => /^\s*(?:CMD|ENTRYPOINT)\b/i.test(l)).join('\n');
+    if (/--log-level(?:=|\s+)["']?(?:debug|trace)\b/i.test(startLines)) {
+      warn('docker-debug-log', where, 'el arranque usa --log-level debug/trace: los logs de depuración pueden incluir cabeceras, tokens y datos de usuario');
+    }
   }
   const secretEnv = new RegExp(`^\\s*(ENV|ARG)\\s+[A-Z0-9_]*(${SECRET_WORDS})[A-Z0-9_]*(?:=|\\s+)\\S`, 'm');
   if (secretEnv.test(code)) fail('docker-secret-env', where, 'un secreto en ENV/ARG queda grabado en las capas de la imagen: usa el gestor de secretos de la plataforma');
@@ -137,12 +169,12 @@ function checkDockerignore() {
   if (s === null) return fail('dockerignore-missing', where, 'no existe: todo el contexto (incluidos .env y .git) entraría en la imagen');
   const lines = s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const has = (...alts) => alts.some((a) => lines.includes(a));
-  if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
-  if (!has('.env.*', '**/.env.*', '.env*', '**/.env*')) fail('dockerignore-env', where, 'falta `**/.env.*` (.env.local, .env.production…)');
+  if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env', '**/*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
+  if (!has('.env.*', '**/.env.*', '.env_*', '**/.env_*', '.env*', '**/.env*')) fail('dockerignore-env', where, 'falta `**/.env.*` o `**/.env_*` (.env.local, .env_prod…)');
   if (!has('.git', '**/.git', '.git/', '**/.git/')) fail('dockerignore-git', where, 'falta `.git` (historial con posibles secretos antiguos)');
   if (!has('node_modules', '**/node_modules', 'node_modules/', '**/node_modules/')) fail('dockerignore-node-modules', where, 'falta `**/node_modules` (binarios del host y paquetes de desarrollo)');
   for (const l of lines) {
-    if (/^!.*\.env/.test(l) && !/\.env\.(example|sample|template)$/.test(l)) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
+    if (/^!.*\.env/.test(l) && isEnvFile(l.slice(1))) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
   }
 }
 
@@ -196,7 +228,7 @@ function checkFiles(extra) {
   const inRepoRoot = tracked !== null && fs.existsSync(path.join(root, '.git'));
   const files = new Set([...(inRepoRoot ? tracked : walk(root)), ...extra]);
   for (const f of files) {
-    if (/(^|\/)\.env(\.[^/]*)?$/.test(f) && !/\.env\.(example|sample|template|dist)$/.test(f)) {
+    if (isEnvFile(f)) {
       if (inRepoRoot && tracked.includes(f)) fail('env-tracked', f, 'fichero .env versionado: los secretos nunca van al repositorio (sácalo, añádelo a .gitignore y rota sus claves)');
       continue;
     }
@@ -218,7 +250,21 @@ function checkFiles(extra) {
   }
 }
 
-const extra = argv
+// Modo acotado (--changed <fichero>, lo usa el hook tras cada edición): solo cuenta lo que causa ese fichero.
+// Un fichero ajeno al proyecto no se comprueba. El modo completo (CI) no cambia.
+const changedRel = changedArg ? rel(path.resolve(changedArg)) : null;
+if (changedRel !== null && (!changedRel || changedRel.startsWith('..') || path.isAbsolute(changedRel))) process.exit(0);
+const changedGroup = (() => {
+  if (changedRel === null) return null;
+  if ((config.dockerfiles || []).includes(changedRel) || changedRel === config.dockerignore) return 'docker';
+  if ((config.viteConfigs || []).includes(changedRel)) return 'vite';
+  if (config.serverEntry && changedRel === config.serverEntry) return 'server';
+  return null;
+})();
+const groupOf = (rule) => (/^docker/.test(rule) ? 'docker' : /^vite-/.test(rule) ? 'vite' : /^server-/.test(rule) ? 'server' : null);
+const causedByChanged = (p) => changedRel === null || p.where === changedRel || (changedGroup !== null && groupOf(p.rule) === changedGroup);
+
+const extra = [...argv, ...(changedArg ? [changedArg] : [])]
   .map((p) => rel(path.resolve(p)))
   .filter((p) => p && !p.startsWith('..') && !path.isAbsolute(p));
 
@@ -229,9 +275,11 @@ checkViteConfig();
 checkServerEntry();
 checkFiles(extra);
 
-if (warnings.length) console.warn('⚠ claude-guard: avisos\n' + warnings.map((w) => '  - ' + w).join('\n'));
-if (problems.length) {
-  console.error(`✖ claude-guard · seguridad del despliegue: ${problems.length} problema(s)\n` + problems.map((p) => '  - ' + p).join('\n'));
+const shownWarnings = warnings.filter(causedByChanged);
+const shownProblems = problems.filter(causedByChanged);
+if (shownWarnings.length) console.warn('⚠ claude-guard: avisos\n' + shownWarnings.map((w) => '  - ' + w.text).join('\n'));
+if (shownProblems.length) {
+  console.error(`✖ claude-guard · seguridad del despliegue: ${shownProblems.length} problema(s)\n` + shownProblems.map((p) => '  - ' + p.text).join('\n'));
   console.error('\nCorrige la causa; no relajes la regla. Catálogo y motivos: docs/reglas.md del repositorio claude-guard.');
   process.exit(1);
 }

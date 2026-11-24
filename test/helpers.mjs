@@ -38,7 +38,12 @@ export const FAKE = {
   nextPublicSecretVar: ['NEXT', '_PUBLIC_', 'STRIPE_SECRET'].join(''),
   googleKey: ['AI', 'za', 'Sy', 'A'.repeat(33)].join(''),
   githubToken: ['gh', 'p_', 'x'.repeat(36)].join(''),
+  googleOauthSecret: ['GOC', 'SPX-', 'a'.repeat(28)].join(''),
+  pemHeader: ['-----BEGIN RSA PRIVATE', ' KEY-----'].join(''),
 };
+
+/** JSON de cuenta de servicio de Google (falso), con la clave en otra línea que el tipo. */
+export const fakeServiceAccountJson = () => JSON.stringify({ type: 'service_' + 'account', project_id: 'demo', private_key: 'not-a-real-key', client_email: 'sa@demo.example' }, null, 2) + '\n';
 
 /** Proyecto de ejemplo que cumple todas las reglas (Express + Vite, imagen multi-stage). */
 export function goodProject(root) {

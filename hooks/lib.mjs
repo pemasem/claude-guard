@@ -39,7 +39,24 @@ export function currentBranch(cwd) {
 
 export const DEFAULT_CONFIG = Object.freeze({
   protectedBranches: ['main', 'master', 'develop'],
+  envTemplates: [],
 });
+
+/**
+ * ¿Es un fichero de variables de entorno? .env, .env.local, .env_prod, .env-staging, prod.env…
+ * Quedan fuera las plantillas sin valores (.env.example/.sample/.template/.dist, también con "_" o "-")
+ * y las que el proyecto declare en `envTemplates` (p. ej. ".env.master").
+ */
+export function isEnvFile(file, templates = []) {
+  const f = norm(file);
+  const base = f.split('/').pop();
+  if (!/^(\.env([._-].+)?|.+\.env)$/i.test(base)) return false;
+  if (/[._-](example|sample|template|dist)$/i.test(base)) return false;
+  return !(templates || []).some((t) => {
+    const n = norm(t);
+    return f === n || f.endsWith('/' + n);
+  });
+}
 
 /** Lee claude-guard.config.json de la raíz del proyecto (si existe) sobre los valores por defecto. */
 export function loadConfig(dir) {

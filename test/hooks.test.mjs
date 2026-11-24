@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { FAKE, PKG, git, put, run, tmpDir } from './helpers.mjs';
+import { FAKE, PKG, git, goodProject, put, run, tmpDir } from './helpers.mjs';
 
 const hook = (name) => path.join(PKG, 'hooks', name);
 const bash = (command, dir) => run(hook('guard-bash.mjs'), [], { input: JSON.stringify({ tool_input: { command }, cwd: dir }), env: { CLAUDE_PROJECT_DIR: dir } });
@@ -93,4 +93,194 @@ test('post-edit: bloquea un secreto o una variable pública con secreto tras edi
   const r2 = post(pub);
   assert.equal(r2.status, 2);
   assert.match(r2.stderr, /public-secret-var/);
+});
+
+test('variantes de nombre de .env: .env_local, .env-staging, prod.env', () => {
+  const dir = tmpDir();
+  for (const c of ['cat src/.env_local', 'Get-Content src/.env_prod', 'type src\\.env-staging', 'cat config/prod.env', 'grep KEY .env_dev', 'gc .env.local', 'Select-String X -Path .env_prod']) {
+    assert.equal(bash(c, dir).status, 2, c);
+  }
+  for (const c of ['cat .env.example', 'cat .env_example', 'cat .env-sample', 'cat prod.env.template', 'cat src/environment.ts', 'cat .envrc.md', 'ls .env_prod']) {
+    assert.equal(bash(c, dir).status, 0, c);
+  }
+  for (const f of ['/p/src/.env_local', '/p/.env_dev', '/p/.env_prod', '/p/prod.env', '/p/.env-staging', 'C:\\p\\src\\.env_prod']) {
+    assert.equal(file('Read', f, dir).status, 2, f);
+    assert.equal(file('Edit', f, dir).status, 2, f);
+  }
+  for (const f of ['/p/.env.example', '/p/.env_example', '/p/.env-sample', '/p/.env_template', '/p/prod.env.dist', '/p/src/environment.ts', '/p/.envrc']) {
+    assert.equal(file('Read', f, dir).status, 0, f);
+  }
+});
+
+test('envTemplates: plantillas propias versionadas (.env.master) legibles', () => {
+  const dir = tmpDir();
+  assert.equal(file('Read', '/p/src/.env.master', dir).status, 2);
+  assert.equal(bash('cat src/.env.master', dir).status, 2);
+  put(dir, 'claude-guard.config.json', JSON.stringify({ envTemplates: ['.env.master'] }));
+  assert.equal(file('Read', '/p/src/.env.master', dir).status, 0);
+  assert.equal(bash('cat src/.env.master', dir).status, 0);
+  assert.equal(file('Read', '/p/src/.env_prod', dir).status, 2);
+});
+
+test('post-edit: ignora ficheros fuera del proyecto y problemas previos ajenos al fichero editado', () => {
+  const dir = goodProject(tmpDir());
+  run(path.join(PKG, 'install.mjs'), [dir]);
+  const post = (f) => run(path.join(dir, '.claude', 'hooks', 'claude-guard', 'post-edit.mjs'), [], { input: JSON.stringify({ tool_input: { file_path: f } }), env: { CLAUDE_PROJECT_DIR: dir } });
+  // Problema previo en el proyecto: la imagen corre como root.
+  put(dir, 'Dockerfile', fs.readFileSync(path.join(dir, 'Dockerfile'), 'utf8').replace('USER node\n', ''));
+
+  const outside = put(tmpDir(), 'notes.md', 'texto\n');
+  assert.equal(post(outside).status, 0, post(outside).out);
+  // Aunque el fichero ajeno contenga un secreto: no es del proyecto.
+  const outsideLeak = put(tmpDir(), 'k.ts', `const k = '${FAKE.googleKey}';\n`);
+  assert.equal(post(outsideLeak).status, 0);
+
+  const unrelated = put(dir, 'src/server/ok.ts', 'export const a = 1;\n');
+  assert.equal(post(unrelated).status, 0, post(unrelated).out);
+
+  // Editar el Dockerfile roto sí bloquea.
+  const r = post(path.join(dir, 'Dockerfile'));
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /\[docker-user\]/);
+});
+
+test('post-edit: un .env versionado bloquea al editarlo, no al editar otro fichero', () => {
+  const dir = goodProject(tmpDir());
+  run(path.join(PKG, 'install.mjs'), [dir]);
+  git(dir, 'init', '-q');
+  put(dir, 'config/.env_prod', 'X=1\n');
+  git(dir, 'add', '-A');
+  const post = (f) => run(path.join(dir, '.claude', 'hooks', 'claude-guard', 'post-edit.mjs'), [], { input: JSON.stringify({ tool_input: { file_path: f } }), env: { CLAUDE_PROJECT_DIR: dir } });
+  assert.equal(post(path.join(dir, 'server', 'index.js')).status, 0);
+  assert.equal(post(path.join(dir, 'config', '.env_prod')).status, 2);
+});
+
+test('guard-bash bloquea el volcado y la lectura de variables de entorno con secretos', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'Write-Host $env:OPENAI_API_KEY',
+    'echo ${env:GITHUB_TOKEN}',
+    'Get-Item Env:DB_PASSWORD',
+    'dir env:',
+    'ls env:',
+    'Get-ChildItem env:*',
+    'gi env:SECRET_KEY',
+    '[Environment]::GetEnvironmentVariable("API_KEY")',
+    '[Environment]::GetEnvironmentVariable($name)',
+    '[Environment]::GetEnvironmentVariables()',
+    'python -c "import os; print(os.environ)"',
+    'python3 -c "import os,json; print(json.dumps(dict(os.environ)))"',
+    'python -c "import os; print(os.getenv(\'OPENAI_API_KEY\'))"',
+    'python -c "import os; print(os.environ[\'DB_PASSWORD\'])"',
+    'py -c "import os; [print(k, v) for k, v in os.environ.items()]"',
+    'echo $OPENAI_API_KEY',
+    'echo "token: ${GITHUB_TOKEN}"',
+    'printf "%s" $DB_PASSWORD',
+    'set',
+    'cmd /c set',
+    'cd app && set',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+});
+
+test('guard-bash deja pasar el uso normal de variables de entorno', () => {
+  const dir = tmpDir();
+  const ok = [
+    '$env:PATH = "C:\\tools;" + $env:PATH',
+    'Write-Host $env:NODE_ENV',
+    '$env:OPENAI_API_KEY = "x"',
+    '$env:PWD',
+    'ls env:PATH',
+    'Get-Item Env:NODE_ENV',
+    '[Environment]::GetEnvironmentVariable("PATH")',
+    'python -c "import os; print(os.environ[\'HOME\'])"',
+    'python -c "import os; print(os.getenv(\'NODE_ENV\', \'dev\'))"',
+    'python -c "import os; os.environ[\'X\'] = \'1\'"',
+    'python -c "print(1+1)"',
+    'python script.py',
+    'echo $PATH',
+    'echo $HOME $PWD',
+    'echo hola',
+    'set -e',
+    'set -o pipefail; npm test',
+    'npm run set',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+});
+
+test('guard-bash: push forzado con "+" y refspecs hacia ramas protegidas', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'git push origin +master',
+    'git push origin +feature/x',
+    'git push origin +HEAD:feature/x',
+    'git push origin feature:master',
+    'git push origin HEAD:refs/heads/master',
+    'git push origin feature/x:refs/heads/develop',
+    'git push -u origin HEAD:main',
+    'git push origin :master',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+  const ok = [
+    'git push origin feature/T12-login',
+    'git push -u origin feature/x',
+    'git push origin feature/main-fix',
+    'git push origin feature:feature2',
+    'git push origin HEAD:refs/heads/feature/x',
+    'git push origin feature/a+b',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
+});
+
+test('protect-files: lockfiles de otros ecosistemas no se editan (sí se leen)', () => {
+  const dir = tmpDir();
+  for (const f of ['poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'composer.lock', 'Gemfile.lock', 'go.sum']) {
+    assert.equal(file('Edit', `/p/src/${f}`, dir).status, 2, f);
+    assert.equal(file('Write', `C:\\p\\${f}`, dir).status, 2, f);
+    assert.equal(file('Read', `/p/src/${f}`, dir).status, 0, f);
+  }
+  // Ficheros con nombre parecido pero que no son lockfiles.
+  for (const f of ['go.mod', 'pyproject.toml', 'Cargo.toml', 'composer.json', 'my-go.sum.md']) assert.equal(file('Edit', `/p/${f}`, dir).status, 0, f);
+});
+
+test('protect-files: credenciales de cuentas de servicio, registros, git y clústeres', () => {
+  const dir = tmpDir();
+  for (const f of ['/p/deploy.sa.json', '/p/credentials/gcp.json', '/p/config/secrets/db/prod.json', '/p/.npmrc', '/p/.pypirc', '/home/u/.netrc', '/p/.git-credentials', '/p/kubeconfig', '/home/u/.kube/config', 'C:\\p\\credentials\\x.json']) {
+    assert.equal(file('Read', f, dir).status, 2, f);
+    assert.equal(file('Edit', f, dir).status, 2, f);
+  }
+  for (const f of ['/p/package.json', '/p/config/settings.json', '/p/secrets/README.md', '/p/credentials.md', '/p/src/netrc-parser.ts']) {
+    assert.equal(file('Read', f, dir).status, 0, f);
+  }
+});
+
+test('guard-bash: bloquea la extracción de secretos de la nube y de Kubernetes', () => {
+  const dir = tmpDir();
+  const blocked = [
+    'gcloud secrets versions access latest --secret=db',
+    'gcloud auth print-access-token',
+    'gcloud auth application-default print-access-token',
+    'gcloud auth print-identity-token',
+    'aws secretsmanager get-secret-value --secret-id prod/db',
+    'az keyvault secret show --name db --vault-name v',
+    'kubectl get secret db -o yaml',
+    'kubectl get secrets -n prod -o json',
+    'kubectl get secret db -ojson',
+    'kubectl get secret db --output=yaml',
+    'kubectl -n prod get secret db -o jsonpath="{.data}"',
+  ];
+  for (const c of blocked) assert.equal(bash(c, dir).status, 2, c);
+  const ok = [
+    'gcloud secrets list',
+    'gcloud secrets describe db',
+    'gcloud auth login',
+    'gcloud run deploy app --source .',
+    'aws secretsmanager list-secrets',
+    'az keyvault secret list --vault-name v',
+    'kubectl get secrets',
+    'kubectl get pods -o yaml',
+    'kubectl get secret db',
+    'kubectl describe secret db',
+  ];
+  for (const c of ok) assert.equal(bash(c, dir).status, 0, c);
 });

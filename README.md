@@ -74,6 +74,8 @@ Para actualizar: `git pull` en `claude-guard` y vuelve a ejecutar el instalador.
 | `serverEntry` | `null` | Si lo defines, prohíbe importar `vite` de forma estática en ese fichero |
 | `allowMention` | `docs/`, `test/`… | Rutas que pueden **nombrar** variables públicas con secreto (para documentarlas o probarlas) |
 | `strictImportMetaEnv` | `false` | Si está a `true`, el frontend solo puede leer `import.meta.env.DEV/PROD/MODE/BASE_URL/SSR` |
+| `envTemplates` | `[]` | Nombres extra de plantillas versionadas sin valores (p. ej. `.env.master`): ni `env-tracked` ni los hooks las tratan como secretos |
+| `secretScanAllow` | `[]` | Ficheros o carpetas que `scan-secrets` no recorre porque contienen valores falsos conocidos (p. ej. claves PEM de test en un JSON, donde no cabe `secret-scan: ignore`). Siempre se listan en la salida |
 | `copyAllIsError` | `false` | Si está a `true`, `COPY . .` pasa de aviso a error |
 | `disable` | `[]` | Ids de regla desactivados. **Solo con una razón documentada** en el mismo fichero |
 
