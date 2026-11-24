@@ -18,3 +18,36 @@ jobs:
         run: node .claude-guard/check-deploy-safety.mjs
       - name: Escaneo de secretos
         run: node .claude-guard/scan-secrets.mjs
+      # Opcional (borra este paso si no lo quieres): auditoría de dependencias de producción.
+      # - npm: `npm audit --omit=dev --audit-level=high` en cada carpeta versionada con package-lock.json.
+      # - Python: `pip-audit` sobre cada requirements.txt y cada pyproject.toml (sin requirements.txt en su carpeta).
+      #   Si pip-audit no está instalado se intenta instalar; si no se puede, se omite sin romper el paso.
+      # Falla con vulnerabilidades altas o críticas (npm) o con cualquiera que pip-audit encuentre.
+      - name: Auditoría de dependencias (opcional)
+        run: |
+          status=0
+          for lock in $(git ls-files '*package-lock.json'); do
+            dir=$(dirname "$lock")
+            echo "== npm audit en $dir"
+            (cd "$dir" && npm audit --omit=dev --audit-level=high) || status=1
+          done
+          reqs=$(git ls-files '*requirements.txt')
+          projects=$(git ls-files '*pyproject.toml')
+          if [ -n "$reqs$projects" ]; then
+            command -v pip-audit >/dev/null 2>&1 || python3 -m pip install --quiet pip-audit >/dev/null 2>&1 || true
+            if command -v pip-audit >/dev/null 2>&1; then
+              for f in $reqs; do
+                echo "== pip-audit en $f"
+                pip-audit -r "$f" || status=1
+              done
+              for f in $projects; do
+                dir=$(dirname "$f")
+                [ -f "$dir/requirements.txt" ] && continue
+                echo "== pip-audit en $dir"
+                pip-audit "$dir" || status=1
+              done
+            else
+              echo "pip-audit no está instalado y no se ha podido instalar: se omite la auditoría de Python"
+            fi
+          fi
+          exit $status

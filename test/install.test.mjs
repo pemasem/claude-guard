@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { PKG, put, run, tmpDir } from './helpers.mjs';
+import { spawnSync } from 'node:child_process';
+import { PKG, git, put, run, tmpDir } from './helpers.mjs';
 
 const installer = path.join(PKG, 'install.mjs');
 const settingsOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8'));
@@ -119,4 +120,29 @@ test('la sección de CLAUDE.md incluye las reglas de comportamiento y deja la de
   for (const re of [/SSRF/, /relative_to\(base\)/, /delimitado y marcado como datos/, /--no-sandbox/]) assert.match(md, re);
   const last = md.split('\n').filter((l) => /^\d+\. /.test(l)).pop();
   assert.match(last, /^9\. \*\*Ninguna regla de claude-guard se relaja/);
+});
+
+test('CI: el paso opcional de auditoría de dependencias es un script válido y no rompe sin lockfiles ni pip-audit', () => {
+  // Saca el bloque `run: |` / `- |` (indentación común quitada) de cada plantilla.
+  const block = (file, marker) => {
+    const lines = fs.readFileSync(path.join(PKG, 'ci', file), 'utf8').split('\n');
+    const start = lines.findIndex((l) => l.trim() === marker) + 1;
+    assert.ok(start > 0, `${file}: falta ${marker}`);
+    const indent = /^\s*/.exec(lines[start])[0].length;
+    const out = [];
+    for (let i = start; i < lines.length && (!lines[i].trim() || /^\s*/.exec(lines[i])[0].length >= indent); i++) out.push(lines[i].slice(indent));
+    return out.join('\n');
+  };
+  for (const [file, marker] of [['github-actions.yml', 'run: |'], ['bitbucket-pipelines.yml', '- |']]) {
+    const script = block(file, marker);
+    assert.match(script, /npm audit --omit=dev --audit-level=high/, file);
+    assert.match(script, /pip-audit/, file);
+    const dir = tmpDir();
+    put(dir, 'audit.sh', script + '\n');
+    git(dir, 'init', '-q');
+    assert.equal(spawnSync('bash', ['-n', path.join(dir, 'audit.sh')], { encoding: 'utf8' }).status, 0, `${file}: bash -n`);
+    // Repositorio sin package-lock.json ni requirements: no hay nada que auditar y no falla.
+    const r = spawnSync('bash', [path.join(dir, 'audit.sh')], { cwd: dir, encoding: 'utf8' });
+    assert.equal(r.status, 0, `${file}: ${r.stdout}${r.stderr}`);
+  }
 });
