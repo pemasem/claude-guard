@@ -2,6 +2,8 @@
 
 ## Sin publicar / Unreleased
 
+- Instalador: las denegaciones de `settings.json` ya no usan comodines (`Read(**/.env.*)`, `.env_*`, `.env-*`) que bloqueaban también `.env.example`, la plantilla que `protect-files` pide mantener (las reglas de permisos de Claude Code no admiten excepciones). Ahora deniega los nombres reales habituales (`.env`, `.env.local`, `.env.production`, `.env.staging`…) y `*.env`; el resto lo sigue bloqueando el hook. Al reinstalar o desinstalar se retiran los comodines antiguos.
+
 - `guard-bash`: bloquea los comandos que vacían o revierten toda la base de datos (`alembic downgrade base`, `manage.py migrate <app> zero`/`flush`, `prisma migrate reset`, `prisma db push --force-reset`, `rails db:drop`/`db:reset`, `sequelize db:migrate:undo:all`, `knex migrate:rollback --all`, `typeorm schema:drop`, `artisan migrate:fresh`/`db:wipe`…). Revertir un paso sigue permitido.
 
 - Falsos positivos de un monorepo real (FastAPI + Next.js + Caddy + Docker):
