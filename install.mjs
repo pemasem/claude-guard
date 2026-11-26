@@ -25,7 +25,20 @@ const HOOKS = [
   { event: 'PreToolUse', matcher: 'Read|Edit|Write|MultiEdit|NotebookEdit', file: 'protect-files.mjs', timeout: 10 },
   { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit', file: 'post-edit.mjs', timeout: 30 },
 ];
-const DENY = ['Read(**/.env)', 'Read(**/.env.*)', 'Edit(**/.env)', 'Edit(**/.env.*)', 'Read(**/.env_*)', 'Read(**/.env-*)', 'Read(**/*.env)', 'Edit(**/.env_*)', 'Edit(**/.env-*)', 'Edit(**/*.env)', 'Bash(git push --force*)', 'Bash(git push -f*)', 'Bash(npm audit fix --force*)'];
+// Las reglas de permisos de Claude Code no admiten excepciones: un comodín como `Read(**/.env.*)` deniega también
+// `.env.example`, la plantilla que el propio hook pide mantener. Por eso aquí solo van los nombres reales más comunes;
+// el resto (`.env.*`, `.env_*`, `.env-*` salvo plantillas y `envTemplates`) lo bloquea el hook protect-files.
+const ENV_NAMES = ['.env', '.env.local', '.env.development', '.env.development.local', '.env.dev', '.env.test', '.env.test.local', '.env.staging', '.env.production', '.env.production.local', '.env.prod'];
+const DENY = [
+  ...ENV_NAMES.flatMap((n) => [`Read(**/${n})`, `Edit(**/${n})`]),
+  'Read(**/*.env)',
+  'Edit(**/*.env)',
+  'Bash(git push --force*)',
+  'Bash(git push -f*)',
+  'Bash(npm audit fix --force*)',
+];
+// Comodines de versiones anteriores que bloqueaban también las plantillas: se retiran al reinstalar y al desinstalar.
+const LEGACY_DENY = ['Read(**/.env.*)', 'Edit(**/.env.*)', 'Read(**/.env_*)', 'Read(**/.env-*)', 'Edit(**/.env_*)', 'Edit(**/.env-*)'];
 const DEFAULT_CONFIG = {
   _info: 'claude-guard: ajusta las rutas a tu proyecto. "disable" solo con una razón documentada aquí. Ver README de claude-guard.',
   protectedBranches: ['main', 'master', 'develop'],
@@ -112,6 +125,11 @@ function mergeSettings(settings) {
   }
   s.permissions ||= {};
   s.permissions.deny ||= [];
+  const legacy = s.permissions.deny.filter((d) => LEGACY_DENY.includes(d));
+  if (legacy.length) {
+    s.permissions.deny = s.permissions.deny.filter((d) => !LEGACY_DENY.includes(d));
+    log(`retira denegaciones antiguas que bloqueaban las plantillas .env.example (las cubre protect-files): ${legacy.join(', ')}`);
+  }
   for (const d of DENY) if (!s.permissions.deny.includes(d)) s.permissions.deny.push(d);
   return s;
 }
@@ -126,7 +144,7 @@ function unmergeSettings(settings) {
   }
   if (s.hooks && !Object.keys(s.hooks).length) delete s.hooks;
   if (s.permissions?.deny) {
-    s.permissions.deny = s.permissions.deny.filter((d) => !DENY.includes(d));
+    s.permissions.deny = s.permissions.deny.filter((d) => !DENY.includes(d) && !LEGACY_DENY.includes(d));
     if (!s.permissions.deny.length) delete s.permissions.deny;
     if (!Object.keys(s.permissions).length) delete s.permissions;
   }

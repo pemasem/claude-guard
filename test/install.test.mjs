@@ -104,11 +104,32 @@ test('el proyecto instalado se puede comprobar con el comprobador copiado', () =
   assert.equal(r.status, 0, r.out);
 });
 
-test('el instalador deniega también .env_* y .env-*', () => {
+test('el instalador deniega los .env reales y no las plantillas', () => {
   const dir = tmpDir();
-  run(path.join(PKG, 'install.mjs'), [dir]);
-  const deny = JSON.parse(fs.readFileSync(path.join(dir, '.claude', 'settings.json'), 'utf8')).permissions.deny;
-  for (const d of ['Read(**/.env_*)', 'Read(**/.env-*)', 'Edit(**/.env_*)', 'Read(**/*.env)']) assert.ok(deny.includes(d), d);
+  run(installer, [dir]);
+  const deny = settingsOf(dir).permissions.deny;
+  for (const d of ['Read(**/.env)', 'Read(**/.env.local)', 'Edit(**/.env.production)', 'Read(**/*.env)']) assert.ok(deny.includes(d), d);
+  // Las reglas de permisos no admiten excepciones: ningún comodín puede casar con una plantilla.
+  for (const d of deny) {
+    const m = /^(?:Read|Edit)\(\*\*\/(.+)\)$/.exec(d);
+    if (!m) continue;
+    const re = new RegExp('^' + m[1].replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+    for (const t of ['.env.example', '.env_example', '.env-example', '.env.sample', '.env.template']) assert.ok(!re.test(t), `${d} bloquea ${t}`);
+  }
+});
+
+test('al reinstalar retira los comodines antiguos que bloqueaban las plantillas y conserva el resto', () => {
+  const dir = tmpDir();
+  put(dir, '.claude/settings.json', JSON.stringify({ permissions: { deny: ['Bash(rm *)', 'Read(**/.env.*)', 'Edit(**/.env.*)', 'Read(**/.env_*)', 'Edit(**/.env-*)'] } }));
+  const r = run(installer, [dir]);
+  assert.equal(r.status, 0, r.out);
+  const deny = settingsOf(dir).permissions.deny;
+  for (const d of ['Read(**/.env.*)', 'Edit(**/.env.*)', 'Read(**/.env_*)', 'Edit(**/.env-*)']) assert.ok(!deny.includes(d), d);
+  assert.ok(deny.includes('Bash(rm *)'));
+  assert.ok(deny.includes('Read(**/.env.local)'));
+  assert.match(r.out, /retira denegaciones antiguas/);
+  run(installer, ['uninstall', dir]);
+  assert.deepEqual(settingsOf(dir).permissions.deny, ['Bash(rm *)']);
 });
 
 test('la sección de CLAUDE.md incluye las reglas de comportamiento y deja la de no relajar reglas la última', () => {
