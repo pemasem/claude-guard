@@ -296,7 +296,7 @@ function checkDockerContexts(dockerfiles) {
       if (!seen.has(where)) {
         seen.add(where);
         if (s === null) fail('dockerignore-missing', where, 'no existe: todo el contexto de construcción (incluidos .env y .git) entraría en la imagen. En un monorepo, cada Dockerfile necesita el .dockerignore de su contexto');
-        else checkDockerignore(where, s);
+        else checkDockerignore(where, s, ctxAbs);
       }
       // Un .env real dentro del contexto con `COPY . …` y sin .dockerignore que lo excluya acaba en la imagen.
       if (!d.copiesContext) continue;
@@ -311,13 +311,16 @@ function checkDockerContexts(dockerfiles) {
   }
 }
 
-function checkDockerignore(where, s) {
+// `.git` solo se exige si el contexto es la raíz del proyecto o contiene `.git`; `node_modules` solo si el contexto
+// tiene `package.json` o `node_modules`. `.env` se exige siempre: puede aparecer en cualquier momento.
+function checkDockerignore(where, s, ctxAbs = root) {
   const lines = s.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const has = (...alts) => alts.some((a) => lines.includes(a));
   if (!has('.env', '**/.env', '.env*', '**/.env*', '*.env', '**/*.env')) fail('dockerignore-env', where, 'falta `**/.env`');
   if (!has('.env.*', '**/.env.*', '.env_*', '**/.env_*', '.env*', '**/.env*')) fail('dockerignore-env', where, 'falta `**/.env.*` o `**/.env_*` (.env.local, .env_prod…)');
-  if (!has('.git', '**/.git', '.git/', '**/.git/')) fail('dockerignore-git', where, 'falta `.git` (historial con posibles secretos antiguos)');
-  if (!has('node_modules', '**/node_modules', 'node_modules/', '**/node_modules/')) fail('dockerignore-node-modules', where, 'falta `**/node_modules` (binarios del host y paquetes de desarrollo)');
+  const hasIn = (n) => fs.existsSync(path.join(ctxAbs, n));
+  if ((ctxAbs === root || hasIn('.git')) && !has('.git', '**/.git', '.git/', '**/.git/')) fail('dockerignore-git', where, 'falta `.git` (historial con posibles secretos antiguos)');
+  if ((hasIn('package.json') || hasIn('node_modules')) && !has('node_modules', '**/node_modules', 'node_modules/', '**/node_modules/')) fail('dockerignore-node-modules', where, 'falta `**/node_modules` (binarios del host y paquetes de desarrollo)');
   for (const l of lines) {
     if (/^!.*\.env/.test(l) && isEnvFile(l.slice(1))) fail('dockerignore-env', where, `no re-incluyas ficheros .env (\`${l}\`)`);
   }
@@ -402,17 +405,45 @@ function projectFiles() {
   return fileListCache;
 }
 
+// Una comparación (startswith/endswith/includes/==/!=/===/!==/in) no asigna un valor por defecto: es la guarda que
+// lo rechaza. `prefix` es el texto de la línea entre el nombre del secreto y la cadena.
+const COMPARISON_BEFORE = /(?:\.(?:startswith|endswith|includes)\s*\(\s*|[!=]==?\s*|\bin\s*[(\[{]?\s*)[^=]*$/i;
+const normSecret = (v) => v.replace(/[-_]/g, '').toLowerCase();
+// Cadenas conocidas de una línea y si van comparadas (guarda) o no (valor por defecto).
+function knownSecretStrings(line) {
+  const name = SECRET_NAME_IN_CODE.exec(line);
+  if (!name) return [];
+  return [...line.matchAll(/(["'`])([^"'`\n]*)\1/g)]
+    .filter((q) => q.index > name.index && normSecret(q[2]) !== normSecret(name[0]) && KNOWN_DEFAULT_SECRET.test(q[2]))
+    .map((q) => ({ value: q[2], guard: COMPARISON_BEFORE.test(line.slice(name.index + name[0].length, q.index)) }));
+}
+function secretGuards(s) {
+  const out = [];
+  for (const line of s.split('\n')) {
+    if (/^\s*(?:#|\/\/|\*)/.test(line)) continue;
+    for (const k of knownSecretStrings(line)) if (k.guard) out.push(normSecret(k.value));
+  }
+  return out;
+}
+let entryGuardsCache = null;
+function entryGuards() {
+  if (entryGuardsCache === null) {
+    const e = config.serverEntry ? read(path.join(root, config.serverEntry)) : null;
+    entryGuardsCache = e === null ? [] : secretGuards(e);
+  }
+  return entryGuardsCache;
+}
+
 // Avisos sobre el contenido de un fichero de código (no de pruebas ni de documentación).
 function checkCodeFile(f, s) {
   if (/\.(?:py|[cm]?[jt]s)$/.test(f) && !isFrontend(f)) {
     const lines = s.split('\n');
-    const norm = (v) => v.replace(/[-_]/g, '').toLowerCase();
+    // Si el propio fichero (o `serverEntry`) rechaza ese valor con una comparación, la asignación por defecto no avisa.
+    const guards = [...secretGuards(s), ...entryGuards()];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line.includes('secret-scan: ignore') || /^\s*(?:#|\/\/|\*)/.test(line)) continue;
-      const name = SECRET_NAME_IN_CODE.exec(line);
-      if (!name) continue;
-      const known = [...line.matchAll(/(["'`])([^"'`\n]*)\1/g)].some((q) => q.index > name.index && norm(q[2]) !== norm(name[0]) && KNOWN_DEFAULT_SECRET.test(q[2]));
+      const known = knownSecretStrings(line).some((k) => !k.guard && !guards.some((g) => normSecret(k.value).startsWith(g)));
       if (known) {
         warn('default-secret-value', f, `línea ${i + 1}: el secreto tiene un valor por defecto conocido (changeme, secret, dev-secret…). Si falta la variable de entorno, el servidor debe negarse a arrancar. Para silenciar un valor falso a propósito: \`secret-scan: ignore\``);
         break;
